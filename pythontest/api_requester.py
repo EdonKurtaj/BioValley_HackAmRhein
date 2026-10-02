@@ -11,13 +11,12 @@ import os
 import re
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+from zoneinfo import ZoneInfo
 
 
 ROOT = Path(__file__).resolve().parent
@@ -28,22 +27,21 @@ SOURCES = [
     {
         "id": "meteoswiss_basel_temperature",
         "name": "MeteoSwiss Basel/Binningen temperature",
-        "url": "https://data.geo.admin.ch/api/stac/v1/collections/ch.meteoschweiz.ogd-smn/items/bas",
+        "url": "https://data.geo.admin.ch/ch.meteoschweiz.messwerte-aktuell/VQHA80.csv",
         "kind": "meteo_current",
-        "station_ids": ["bas"],
-        "measurement_parameters": ["tre200s0"],
+        "station_id": "BAS",
     },
     {
         "id": "basel_dataset_100006",
         "name": "Basel-Stadt dataset 100006 records",
-        "url": "https://data.bs.ch/api/explore/v2.1/catalog/datasets/100006/records/?lang=en&limit=10&offset=0",
+        "url": "https://data.bs.ch/api/explore/v2.1/catalog/datasets/100006/records/?lang=en&limit=10&offset=0&order_by=-datetimefrom",
         "kind": "json",
         "basel_auth": True,
     },
     {
         "id": "basel_dataset_100089",
         "name": "Basel-Stadt dataset 100089 records",
-        "url": "https://data.bs.ch/api/explore/v2.1/catalog/datasets/100089/records/?lang=en&limit=10&offset=0",
+        "url": "https://data.bs.ch/api/explore/v2.1/catalog/datasets/100089/records/?lang=en&limit=10&offset=0&order_by=-timestamp",
         "kind": "json",
         "basel_auth": True,
     },
@@ -311,91 +309,57 @@ def load_meteo_parameter_metadata() -> dict:
 
 def check_meteoswiss_current(source: dict) -> dict:
     checked_at = now_utc()
-    print(f"{source['name']}: Abruf läuft ...", flush=True)
-    items: list[dict] = []
-    page_url: str | None = source["url"]
-    listing_status: int | None = None
-    listing_error: str | None = None
-    listing_bytes = 0
-    retry_after = None
-    while page_url:
-        status, headers, body, error = read_response({**source, "url": page_url})
-        listing_status = status
-        listing_bytes += len(body or b"")
-        if status != 200 or body is None:
-            listing_error = error or f"Station item list returned HTTP {status}"
-            retry_after = headers.get("Retry-After") or headers.get("retry-after")
-            break
-        try:
-            page = json.loads(body)
-        except json.JSONDecodeError as exc:
-            listing_error = f"Station item list was not valid JSON: {exc}"
-            break
-        if page.get("type") == "FeatureCollection":
-            items.extend(page.get("features", []))
-            page_url = next((link.get("href") for link in page.get("links", []) if link.get("rel") == "next"), None)
-        elif page.get("type") == "Feature":
-            items.append(page)
-            page_url = None
-        else:
-            listing_error = "Station item response is not a STAC Feature or FeatureCollection"
-            page_url = None
-
-    wanted_stations = set(source.get("station_ids", []))
-    if wanted_stations:
-        items = [item for item in items if item.get("id", "").lower() in wanted_stations]
-    for item in items:
-        item["measurement_parameters"] = source.get("measurement_parameters", [])
-
-    measurements: list[dict] = []
-    station_errors: list[dict] = []
+    status, headers, body, transport_error = read_response(source)
+    error = transport_error
+    station: dict = {"station_id": source["station_id"], "station_name": "Basel / Binningen"}
     parameter_metadata: dict = {}
-    total_bytes = listing_bytes
-    rate_limited = listing_status == 429
-    subrequest_statuses: list[int] = []
-    if not listing_error:
+    if body is not None and status is not None and 200 <= status < 300:
         try:
-            parameter_metadata = load_meteo_parameter_metadata()
-        except (HTTPError, URLError, TimeoutError, OSError, csv.Error) as exc:
-            # Values are still useful under their official short parameter codes.
-            station_errors.append({"resource": "parameter metadata", "error": str(exc)})
-        with ThreadPoolExecutor(max_workers=6) as executor:
-            fetched = list(executor.map(fetch_station_current, items))
-        for station_result, body, error, status, retry in fetched:
-            total_bytes += len(body or b"")
-            if status is not None:
-                subrequest_statuses.append(status)
-            if status == 429:
-                rate_limited = True
-                retry_after = retry_after or retry
-            if error:
-                station_errors.append({"station_id": station_result.get("station_id"), "name": station_result.get("name"), "http_status": status, "error": error})
-            else:
-                measurements.append(station_result)
-
-    used_parameters = sorted({key for station in measurements for key in station.get("measurements", {})})
+            text = body.decode("cp1252")
+            rows = csv.DictReader(io.StringIO(text, newline=""), delimiter=";")
+            row = next((r for r in rows if r.get("Station/Location", "").strip().upper() == source["station_id"]), None)
+            if row is None:
+                raise ValueError(f"Station {source['station_id']} not present in current-values CSV")
+            observed_utc = datetime.strptime(row["Date"].strip(), "%Y%m%d%H%M").replace(tzinfo=timezone.utc)
+            observed_local = observed_utc.astimezone(ZoneInfo("Europe/Zurich"))
+            temperature = parse_csv_value(row.get("tre200s0", ""))
+            if not isinstance(temperature, (int, float)):
+                raise ValueError("Current temperature value tre200s0 is missing")
+            station.update({
+                "observed_at_utc": observed_utc.isoformat().replace("+00:00", "Z"),
+                "observed_at": observed_local.isoformat(timespec="minutes"),
+                "time_zone": "Europe/Zurich",
+                "age_minutes_at_fetch": round((datetime.now(timezone.utc) - observed_utc).total_seconds() / 60, 1),
+                "measurements": {"tre200s0": temperature},
+            })
+            parameter_metadata = {"tre200s0": {
+                "name_de": "Lufttemperatur 2 m über Boden; Momentanwert",
+                "name_en": "Air temperature 2 m above ground; current value",
+                "unit": "°C",
+            }}
+        except (UnicodeError, csv.Error, KeyError, ValueError) as exc:
+            error = f"Could not parse MeteoSwiss current-values CSV: {exc}"
+    rate_limited = status == 429
+    ok = status is not None and 200 <= status < 300 and error is None
     result = {
         "source_id": source["id"],
         "name": source["name"],
         "url": source["url"],
         "checked_at": checked_at,
-        "http_status": listing_status,
-        "request_ok": not listing_error and bool(measurements) and not station_errors,
+        "http_status": status,
+        "request_ok": ok,
         "rate_limited": rate_limited,
-        "retry_after": retry_after,
-        "response_bytes": total_bytes,
-        "error": listing_error,
+        "retry_after": headers.get("Retry-After") or headers.get("retry-after"),
+        "response_bytes": len(body) if body is not None else None,
+        "error": error,
         "saved": True,
         "latest_file": str((DATA_DIR / source["id"] / "latest.json").relative_to(ROOT)),
         "history_file": str((DATA_DIR / source["id"] / "history.jsonl").relative_to(ROOT)),
         "data": {
-            "collection_id": "ch.meteoschweiz.ogd-smn",
-            "station_count": len(items),
-            "stations_with_current_data": len(measurements),
-            "stations": measurements,
-            "parameter_metadata": {key: parameter_metadata[key] for key in used_parameters if key in parameter_metadata},
-            "parameter_codes_without_metadata": [key for key in used_parameters if key not in parameter_metadata],
-            "station_errors": station_errors,
+            "dataset": "MeteoSwiss current measurements, all stations",
+            "station": station if "measurements" in station else None,
+            "parameter_metadata": parameter_metadata,
+            "file_last_modified": headers.get("Last-Modified"),
         },
     }
     try:
@@ -408,17 +372,10 @@ def check_meteoswiss_current(source: dict) -> dict:
     elif not result["saved"]:
         status_line = "FAILED — could not save response"
     elif result["request_ok"]:
-        bas_temperature = next(
-            (station for station in measurements if station.get("station_id", "").lower() == "bas"),
-            None,
-        )
-        temp = bas_temperature.get("measurements", {}).get("tre200s0") if bas_temperature else None
-        observed_at = bas_temperature.get("observed_at") if bas_temperature else None
-        status_line = f"OK — HTTP 200 — {temp} °C at {observed_at}"
-    elif listing_error:
-        status_line = f"FAILED — HTTP {listing_status or 'connection error'}"
+        temp = station["measurements"]["tre200s0"]
+        status_line = f"OK — HTTP {status} — {temp} °C at {station['observed_at']} ({station['age_minutes_at_fetch']} min old; Europe/Zurich)"
     else:
-        status_line = f"FAILED — data missing for {len(station_errors)} resource(s)"
+        status_line = f"FAILED — HTTP {status or 'connection error'} — {error}"
     print(f"{source['name']}: {status_line}", flush=True)
     return result
 
