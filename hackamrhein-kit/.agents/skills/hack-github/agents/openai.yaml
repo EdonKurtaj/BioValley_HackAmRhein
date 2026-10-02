@@ -1,0 +1,6 @@
+interface:
+  display_name: "GitHub made simple"
+  short_description: "Save, share, merge and undo without fear"
+  brand_color: "#0E7C86"
+policy:
+  allow_implicit_invocation: true

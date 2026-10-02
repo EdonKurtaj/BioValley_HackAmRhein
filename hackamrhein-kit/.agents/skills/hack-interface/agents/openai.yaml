@@ -1,0 +1,6 @@
+interface:
+  display_name: "Interfaces"
+  short_description: "Shared contracts that keep the code's structure"
+  brand_color: "#0E7C86"
+policy:
+  allow_implicit_invocation: true

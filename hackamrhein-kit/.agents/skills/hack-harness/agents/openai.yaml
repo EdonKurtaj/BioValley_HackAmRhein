@@ -1,0 +1,5 @@
+interface:
+  display_name: "Other coding agents"
+  short_description: "Use the kit with another tool, on your computer only"
+policy:
+  allow_implicit_invocation: false

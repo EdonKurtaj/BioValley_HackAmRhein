@@ -1,0 +1,6 @@
+interface:
+  display_name: "Ship"
+  short_description: "Finalise, check, deploy, tag"
+  brand_color: "#0E7C86"
+policy:
+  allow_implicit_invocation: true

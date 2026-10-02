@@ -1,0 +1,11 @@
+name: hack-guard
+on: [push, pull_request]
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Privacy and credential check (whole repo and history)
+        run: bash scripts/hack-guard.sh --all

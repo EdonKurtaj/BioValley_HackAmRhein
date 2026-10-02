@@ -1,0 +1,6 @@
+interface:
+  display_name: "Handoff"
+  short_description: "Rolling task summary so nobody loses the thread"
+  brand_color: "#0E7C86"
+policy:
+  allow_implicit_invocation: true

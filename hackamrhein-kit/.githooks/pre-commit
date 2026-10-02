@@ -1,0 +1,16 @@
+#!/bin/sh
+ROOT="$(git rev-parse --show-toplevel)"
+bash "$ROOT/scripts/hack-guard.sh" --staged || exit 1
+
+# Interface changes need a line in docs/decisions.md in the same commit ($hack-interface)
+CHANGED="$(git diff --cached --name-only)"
+if echo "$CHANGED" | grep -v '^\.agents/' | grep -Eq '(^|/)interfaces(/|\.(py|ts|js)$)'; then
+  if ! echo "$CHANGED" | grep -qx 'docs/decisions.md'; then
+    echo; echo "interface check: this commit changes the interface file, so add one line to docs/decisions.md in the same commit."
+    echo "Ask your assistant: \$hack-interface"; exit 1
+  fi
+fi
+
+# documentation drift: warning only here, strict before shipping
+bash "$ROOT/scripts/doc-check.sh"
+exit 0

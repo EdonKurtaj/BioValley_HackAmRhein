@@ -1,0 +1,2 @@
+#!/bin/sh
+exec bash "$(git rev-parse --show-toplevel)/scripts/hack-guard.sh" --push

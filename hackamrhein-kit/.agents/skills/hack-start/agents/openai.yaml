@@ -1,0 +1,7 @@
+interface:
+  display_name: "Start: get to know me"
+  default_prompt: "$hack-start set me up"
+  short_description: "3 minute setup so the assistant adapts to you"
+  brand_color: "#0E7C86"
+policy:
+  allow_implicit_invocation: true

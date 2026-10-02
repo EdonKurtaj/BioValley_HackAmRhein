@@ -1,0 +1,6 @@
+interface:
+  display_name: "Guard: privacy and credentials"
+  short_description: "Mandatory check before anything goes to GitHub"
+  brand_color: "#0E7C86"
+policy:
+  allow_implicit_invocation: true

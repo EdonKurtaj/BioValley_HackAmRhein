@@ -1,0 +1,6 @@
+interface:
+  display_name: "Pull requests"
+  short_description: "Keep PRs conflict-free, merge only after you say yes"
+  brand_color: "#0E7C86"
+policy:
+  allow_implicit_invocation: true

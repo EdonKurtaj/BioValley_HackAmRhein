@@ -1,0 +1,6 @@
+interface:
+  display_name: "Team"
+  short_description: "Roles, decisions, handoffs, syncs"
+  brand_color: "#0E7C86"
+policy:
+  allow_implicit_invocation: true

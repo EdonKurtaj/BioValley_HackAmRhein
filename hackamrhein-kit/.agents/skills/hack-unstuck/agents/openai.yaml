@@ -1,0 +1,6 @@
+interface:
+  display_name: "Unstuck"
+  short_description: "Errors, loops, and when to ask for help"
+  brand_color: "#0E7C86"
+policy:
+  allow_implicit_invocation: true

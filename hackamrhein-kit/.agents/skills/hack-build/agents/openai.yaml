@@ -1,0 +1,6 @@
+interface:
+  display_name: "Build"
+  short_description: "Do one task in small, checked steps"
+  brand_color: "#0E7C86"
+policy:
+  allow_implicit_invocation: true

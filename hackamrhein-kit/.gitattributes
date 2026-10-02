@@ -1,0 +1,10 @@
+# Line endings: git stores text with LF. Scripts and hooks must stay LF on every OS,
+# otherwise bash fails on Windows checkouts and the privacy check stops running.
+* text=auto
+*.sh text eol=lf
+.githooks/* text eol=lf
+
+# Append-only logs with one line per entry: keep both sides when two branches add lines.
+docs/decisions.md merge=union
+docs/SOURCES.md merge=union
+docs/glossary.md merge=union

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Explain / translate"
+  short_description: "Any tech thing, in your own field's words"
+  brand_color: "#0E7C86"
+policy:
+  allow_implicit_invocation: true

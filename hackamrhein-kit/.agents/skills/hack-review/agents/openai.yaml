@@ -1,0 +1,6 @@
+interface:
+  display_name: "Review"
+  short_description: "Clean code and docs that stay true"
+  brand_color: "#0E7C86"
+policy:
+  allow_implicit_invocation: true
