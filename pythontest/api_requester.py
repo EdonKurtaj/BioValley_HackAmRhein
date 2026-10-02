@@ -4,11 +4,15 @@
 from __future__ import annotations
 
 import argparse
+import csv
+import io
 import json
 import os
 import re
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
@@ -22,10 +26,12 @@ TIMEOUT_SECONDS = 30
 
 SOURCES = [
     {
-        "id": "meteoswiss_station_collection",
-        "name": "MeteoSwiss automatic weather stations collection",
-        "url": "https://data.geo.admin.ch/api/stac/v1/collections/ch.meteoschweiz.ogd-smn",
-        "kind": "json",
+        "id": "meteoswiss_basel_temperature",
+        "name": "MeteoSwiss Basel/Binningen temperature",
+        "url": "https://data.geo.admin.ch/api/stac/v1/collections/ch.meteoschweiz.ogd-smn/items/bas",
+        "kind": "meteo_current",
+        "station_ids": ["bas"],
+        "measurement_parameters": ["tre200s0"],
     },
     {
         "id": "basel_dataset_100006",
@@ -169,6 +175,8 @@ def save_result(source: dict, result: dict, body: bytes | None) -> None:
 
 
 def check_source(source: dict) -> dict:
+    if source["kind"] == "meteo_current":
+        return check_meteoswiss_current(source)
     checked_at = now_utc()
     status, headers, body, transport_error = read_response(source)
     payload, parse_error = parse_payload(source, body)
@@ -216,6 +224,202 @@ def check_source(source: dict) -> dict:
     else:
         outcome = "FAILED — connection error"
     print(f"{label}: {outcome}", flush=True)
+    return result
+
+
+METEO_PARAMETER_URL = "https://data.geo.admin.ch/ch.meteoschweiz.ogd-smn/ogd-smn_meta_parameters.csv"
+
+
+def parse_csv_value(value: str) -> object:
+    value = value.strip()
+    if not value:
+        return None
+    try:
+        number = float(value)
+        return int(number) if number.is_integer() else number
+    except ValueError:
+        return value
+
+
+def fetch_station_current(station: dict) -> tuple[dict, bytes | None, str | None, int | None, str | None]:
+    asset = next(
+        (asset for key, asset in station.get("assets", {}).items() if key.endswith("_t_now.csv")),
+        None,
+    )
+    station_info = {
+        "station_id": station.get("id"),
+        "name": station.get("properties", {}).get("title"),
+        "coordinates_lon_lat": station.get("geometry", {}).get("coordinates"),
+    }
+    if not asset:
+        return station_info, None, "No ten-minute current-data CSV available", None, None
+    response = Request(asset["href"], headers={"User-Agent": "api-requester/1.0 (local data monitoring)"})
+    try:
+        with urlopen(response, timeout=TIMEOUT_SECONDS) as answer:
+            body = answer.read()
+            rows = list(csv.DictReader(io.StringIO(body.decode("utf-8-sig", errors="replace")), delimiter=";"))
+            if not rows:
+                raise ValueError("CSV has no measurement rows")
+            timestamp_column = "reference_timestamp"
+            def timestamp_key(row: dict) -> datetime:
+                return datetime.strptime(row[timestamp_column], "%d.%m.%Y %H:%M")
+            latest_row = max(rows, key=timestamp_key)
+            timestamp = latest_row.pop(timestamp_column, None)
+            abbreviation = latest_row.pop("station_abbr", None)
+            station_info["station_abbr"] = abbreviation
+            station_info["observed_at"] = timestamp
+            wanted = station.get("measurement_parameters")
+            station_info["measurements"] = {
+                key: parse_csv_value(value)
+                for key, value in latest_row.items()
+                if not wanted or key in wanted
+            }
+            station_info["measurement_count"] = sum(value is not None for value in station_info["measurements"].values())
+            return station_info, body, None, answer.status, answer.headers.get("Retry-After")
+    except HTTPError as exc:
+        return station_info, None, str(exc), exc.code, exc.headers.get("Retry-After")
+    except (URLError, TimeoutError, OSError, ValueError, KeyError) as exc:
+        return station_info, None, str(exc), None, None
+
+
+def load_meteo_parameter_metadata() -> dict:
+    """Cache the official parameter dictionary locally and map CSV codes to names/units."""
+    folder = DATA_DIR / "meteoswiss_basel_temperature"
+    cache_path = folder / "parameter_metadata.csv"
+    if not cache_path.exists():
+        request = Request(METEO_PARAMETER_URL, headers={"User-Agent": "api-requester/1.0 (local data monitoring)"})
+        with urlopen(request, timeout=TIMEOUT_SECONDS) as response:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_bytes(response.read())
+    raw = cache_path.read_bytes()
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("cp1252")
+    rows = csv.DictReader(io.StringIO(text), delimiter=";")
+    return {
+        row["parameter_shortname"]: {
+            "name_de": row.get("parameter_description_de", ""),
+            "name_en": row.get("parameter_description_en", ""),
+            "unit": row.get("parameter_unit", ""),
+            "group": row.get("parameter_group_de", ""),
+        }
+        for row in rows
+        if row.get("parameter_shortname")
+    }
+
+
+def check_meteoswiss_current(source: dict) -> dict:
+    checked_at = now_utc()
+    print(f"{source['name']}: Abruf läuft ...", flush=True)
+    items: list[dict] = []
+    page_url: str | None = source["url"]
+    listing_status: int | None = None
+    listing_error: str | None = None
+    listing_bytes = 0
+    retry_after = None
+    while page_url:
+        status, headers, body, error = read_response({**source, "url": page_url})
+        listing_status = status
+        listing_bytes += len(body or b"")
+        if status != 200 or body is None:
+            listing_error = error or f"Station item list returned HTTP {status}"
+            retry_after = headers.get("Retry-After") or headers.get("retry-after")
+            break
+        try:
+            page = json.loads(body)
+        except json.JSONDecodeError as exc:
+            listing_error = f"Station item list was not valid JSON: {exc}"
+            break
+        if page.get("type") == "FeatureCollection":
+            items.extend(page.get("features", []))
+            page_url = next((link.get("href") for link in page.get("links", []) if link.get("rel") == "next"), None)
+        elif page.get("type") == "Feature":
+            items.append(page)
+            page_url = None
+        else:
+            listing_error = "Station item response is not a STAC Feature or FeatureCollection"
+            page_url = None
+
+    wanted_stations = set(source.get("station_ids", []))
+    if wanted_stations:
+        items = [item for item in items if item.get("id", "").lower() in wanted_stations]
+    for item in items:
+        item["measurement_parameters"] = source.get("measurement_parameters", [])
+
+    measurements: list[dict] = []
+    station_errors: list[dict] = []
+    parameter_metadata: dict = {}
+    total_bytes = listing_bytes
+    rate_limited = listing_status == 429
+    subrequest_statuses: list[int] = []
+    if not listing_error:
+        try:
+            parameter_metadata = load_meteo_parameter_metadata()
+        except (HTTPError, URLError, TimeoutError, OSError, csv.Error) as exc:
+            # Values are still useful under their official short parameter codes.
+            station_errors.append({"resource": "parameter metadata", "error": str(exc)})
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            fetched = list(executor.map(fetch_station_current, items))
+        for station_result, body, error, status, retry in fetched:
+            total_bytes += len(body or b"")
+            if status is not None:
+                subrequest_statuses.append(status)
+            if status == 429:
+                rate_limited = True
+                retry_after = retry_after or retry
+            if error:
+                station_errors.append({"station_id": station_result.get("station_id"), "name": station_result.get("name"), "http_status": status, "error": error})
+            else:
+                measurements.append(station_result)
+
+    used_parameters = sorted({key for station in measurements for key in station.get("measurements", {})})
+    result = {
+        "source_id": source["id"],
+        "name": source["name"],
+        "url": source["url"],
+        "checked_at": checked_at,
+        "http_status": listing_status,
+        "request_ok": not listing_error and bool(measurements) and not station_errors,
+        "rate_limited": rate_limited,
+        "retry_after": retry_after,
+        "response_bytes": total_bytes,
+        "error": listing_error,
+        "saved": True,
+        "latest_file": str((DATA_DIR / source["id"] / "latest.json").relative_to(ROOT)),
+        "history_file": str((DATA_DIR / source["id"] / "history.jsonl").relative_to(ROOT)),
+        "data": {
+            "collection_id": "ch.meteoschweiz.ogd-smn",
+            "station_count": len(items),
+            "stations_with_current_data": len(measurements),
+            "stations": measurements,
+            "parameter_metadata": {key: parameter_metadata[key] for key in used_parameters if key in parameter_metadata},
+            "parameter_codes_without_metadata": [key for key in used_parameters if key not in parameter_metadata],
+            "station_errors": station_errors,
+        },
+    }
+    try:
+        save_result(source, result, None)
+    except OSError as exc:
+        result["saved"] = False
+        result["save_error"] = str(exc)
+    if rate_limited:
+        status_line = f"FAILED — rate limited (HTTP 429; Retry-After: {retry_after or 'not provided'})"
+    elif not result["saved"]:
+        status_line = "FAILED — could not save response"
+    elif result["request_ok"]:
+        bas_temperature = next(
+            (station for station in measurements if station.get("station_id", "").lower() == "bas"),
+            None,
+        )
+        temp = bas_temperature.get("measurements", {}).get("tre200s0") if bas_temperature else None
+        observed_at = bas_temperature.get("observed_at") if bas_temperature else None
+        status_line = f"OK — HTTP 200 — {temp} °C at {observed_at}"
+    elif listing_error:
+        status_line = f"FAILED — HTTP {listing_status or 'connection error'}"
+    else:
+        status_line = f"FAILED — data missing for {len(station_errors)} resource(s)"
+    print(f"{source['name']}: {status_line}", flush=True)
     return result
 
 
