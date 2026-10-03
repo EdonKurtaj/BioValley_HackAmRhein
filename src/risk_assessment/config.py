@@ -23,6 +23,13 @@ OPEN_TRAFFIC_WEIGHT = 10.0
 OPEN_RHINE_WEIGHT = 15.0
 OPEN_URGENCY_WEIGHT = 35.0
 
+# Scenario policy agreed in docs/decisions.md; illustrative, not calibrated risk.
+THERMAL_WEIGHT = 0.50
+URGENCY_WEIGHT = 0.30
+ROUTE_WEIGHT = 0.20
+THERMAL_REFERENCE_DEGREE_HOURS = 0.5
+TRAFFIC_ANOMALY_REFERENCE_Z = TRAFFIC_ANOMALY_THRESHOLD
+
 # Handling-context watch ranges; not product-quality limits or official weather warnings.
 HOT_AMBIENT_ONSET_C = 30.0
 HOT_AMBIENT_MAX_C = 40.0

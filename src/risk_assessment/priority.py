@@ -6,15 +6,10 @@ from dataclasses import asdict, dataclass
 from math import isfinite
 
 from .interfaces import ExposureMetrics, RouteEvidence
-
-# Prototype contribution weights; tune with factory stakeholders and validate
-# against shipment outcomes before using operationally.
-# Demo priority: package exposure first, production timing second, route context third.
-THERMAL_WEIGHT = 0.50
-URGENCY_WEIGHT = 0.30
-ROUTE_WEIGHT = 0.20
-THERMAL_REFERENCE_DEGREE_HOURS = 0.5
-TRAFFIC_ANOMALY_REFERENCE_Z = 3.0
+from .config import (
+    ROUTE_WEIGHT, THERMAL_REFERENCE_DEGREE_HOURS, THERMAL_WEIGHT,
+    TRAFFIC_ANOMALY_REFERENCE_Z, URGENCY_WEIGHT,
+)
 
 
 @dataclass(frozen=True)

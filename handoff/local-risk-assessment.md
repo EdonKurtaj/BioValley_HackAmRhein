@@ -62,3 +62,10 @@ Implemented on `feat/local-risk-assessment`; calculations run from saved request
 - Alternative must be suitable for the material, earlier than the original ETA and on time; restricted routes without verified alternatives produce Monitor. Buffer/Expedite require ETA/need-by; Normal requires package, route and handling evidence.
 - Added CLI flags for these inputs and labeled alternate suitability as operator/scenario evidence. Updated README and risk docs; schema.sql unchanged.
 - Nine new shipment-policy tests pass. All 54 tests run: 50 pass, with the same four pre-existing score-weight failures remaining for point 6.
+
+## Score-weight test correction — done
+
+- Preserved the documented 50% thermal / 30% urgency / 20% route policy. Moved scenario weights and reference scales into config.py; the CLI summary now reads the configured values.
+- Corrected stale 40/35/25 test expectations: full contributions 50/30/20, thermal-only half severity bounds 25–75, half route severity contributes 10 with bounds 10–90.
+- Corrected the previously masked coverage assertion: output rounds 1/3 evidence coverage to 33.3%, while group counts remain 1/3.
+- Added independent policy-total and mixed-severity checks. All 56 risk-engine tests pass; point 7 (collector/main/schema integration) remains separate.

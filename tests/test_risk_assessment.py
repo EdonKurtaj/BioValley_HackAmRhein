@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from risk_assessment.decision import decide_action
+from risk_assessment.config import ROUTE_WEIGHT, THERMAL_WEIGHT, URGENCY_WEIGHT
 from risk_assessment.disturbance import detect_traffic_disturbance, score_weather_context
 from risk_assessment.interfaces import ExposureMetrics, RouteEvidence, TemperatureReading, TrafficCounterMatch
 from risk_assessment.logistics import classify_rhine_high_water, traffic_volume_anomaly
@@ -83,6 +84,21 @@ class DecisionTests(unittest.TestCase):
 
 
 class PriorityScoreTests(unittest.TestCase):
+    def test_documented_policy_weights_are_nonnegative_and_sum_to_one(self):
+        self.assertEqual((THERMAL_WEIGHT, URGENCY_WEIGHT, ROUTE_WEIGHT), (0.5, 0.3, 0.2))
+        self.assertAlmostEqual(THERMAL_WEIGHT + URGENCY_WEIGHT + ROUTE_WEIGHT, 1)
+
+    def test_half_severity_components_produce_50_points(self):
+        now = datetime.now(timezone.utc)
+        thermal = ExposureMetrics(0, 0, 0, 0, 0.25, 0)
+        route = RouteEvidence(traffic_anomaly=1.5, traffic_route_matched=True,
+                              estimated_arrival_at=now,
+                              material_needed_at=now + timedelta(hours=2), buffer_hours=4)
+        score = calculate_priority_score(thermal, route)
+        self.assertEqual(score.components, {"thermal": 50, "route": 50, "urgency": 50})
+        self.assertEqual(score.weighted_points, {"thermal": 25, "route": 10, "urgency": 15})
+        self.assertEqual((score.minimum, score.maximum), (50, 50))
+
     def test_all_high_signals_add_to_100_points_without_becoming_damage_probability(self):
         thermal = ExposureMetrics(60, 0, 2, 0, 0.5, 0)
         now = datetime.now(timezone.utc)
@@ -92,15 +108,17 @@ class PriorityScoreTests(unittest.TestCase):
         self.assertEqual(score.minimum, 100)
         self.assertEqual(score.maximum, 100)
         self.assertEqual(score.coverage_percent, 100)
-        self.assertEqual(score.weighted_points, {"thermal": 40.0, "route": 35.0, "urgency": 25.0})
+        self.assertEqual(score.weighted_points, {"thermal": 50.0, "route": 20.0, "urgency": 30.0})
         self.assertIn("not a probability", score.interpretation)
 
     def test_missing_inputs_expand_range_instead_of_counting_as_zero(self):
         thermal = ExposureMetrics(0, 0, 0, 0, 0.25, 0)
         score = calculate_priority_score(thermal, RouteEvidence())
-        self.assertEqual(score.minimum, 20)
-        self.assertEqual(score.maximum, 80)
-        self.assertAlmostEqual(score.coverage_percent, 100 / 3)
+        # Half thermal severity contributes 25; unknown route/urgency add at most 50.
+        self.assertEqual(score.minimum, 25)
+        self.assertEqual(score.maximum, 75)
+        self.assertEqual((score.evidence_coverage_available, score.evidence_coverage_total), (1, 3))
+        self.assertEqual(score.coverage_percent, 33.3)  # Output is rounded to one decimal.
         self.assertEqual(score.score_weight_coverage_percent, 50)
         self.assertIsNone(score.components["route"])
         self.assertIsNone(score.components["urgency"])
@@ -117,13 +135,15 @@ class PriorityScoreTests(unittest.TestCase):
         route = RouteEvidence(traffic_anomaly=1.5, traffic_route_matched=True)
         score = calculate_priority_score(None, route)
         self.assertEqual(score.components["route"], 50)
-        self.assertEqual(score.minimum, 17.5)
+        self.assertEqual(score.minimum, 10)
+        self.assertEqual(score.maximum, 90)
+        self.assertEqual(score.score_weight_coverage_percent, 20)
 
     def test_hot_and_cold_degree_hours_both_add_to_thermal_component(self):
         thermal = ExposureMetrics(0, 0, 0, 0, 0.25, 0.25)
         score = calculate_priority_score(thermal, RouteEvidence())
         self.assertEqual(score.components["thermal"], 100)
-        self.assertEqual(score.weighted_points["thermal"], 40)
+        self.assertEqual(score.weighted_points["thermal"], 50)
 
 
 class ObservedDataScoreTests(unittest.TestCase):

@@ -10,6 +10,7 @@ from math import isfinite
 from pathlib import Path
 
 from .decision import decide_action, parse_time, suggestion_from_assessment
+from .config import ROUTE_WEIGHT, THERMAL_WEIGHT, URGENCY_WEIGHT
 from .disturbance import detect_open_data_disturbances
 from .interfaces import RouteEvidence, TrafficCounterMatch
 from .logistics import TrafficAnomaly, classify_rhine_high_water, traffic_volume_anomaly
@@ -306,7 +307,7 @@ def run_demo_suite(args: argparse.Namespace, results: dict | None = None) -> str
         "",
         "The Normal, Buffer, Expedite, and Reroute cases are simulated so each pathway can be checked without GPS or a map. Current open data stays visible as real context; it does not silently become a simulated truck delay.",
         "Traffic counts can detect unusual volume only when fresh, route-matched counts have enough same-counter/day/hour history. A volume anomaly by itself is not congestion; measured ETA/slack is what drives Expedite.",
-        "Priority score = 50% package thermal exposure + 30% production urgency + 20% route disturbance. Component scales are 0–100; combined weighted points add, while missing inputs are shown as a score range rather than counted as zero.",
+        f"Priority score = {THERMAL_WEIGHT:.0%} package thermal exposure + {URGENCY_WEIGHT:.0%} production urgency + {ROUTE_WEIGHT:.0%} route disturbance. Component scales are 0–100; combined weighted points add, while missing inputs are shown as a score range rather than counted as zero.",
         "The combined case uses current outdoor temperature as a simulated ambient exposure, a simulated traffic disruption, and a simulated one-hour production slack. A quality review overrides logistics action if the simulated box temperature leaves 2–8 °C; the score itself never orders quarantine.",
         "A quality review/hold is triggered by package-temperature evidence and stays separate from the manufacturing priority score.",
         "",
