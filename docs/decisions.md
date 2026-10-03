@@ -4,3 +4,4 @@ One line per decision, newest at the bottom. Never edit an old line; add a new o
 
 Format: `- <date> · <decision> · @<github-username> · Affects: <tasks or areas> · Why: <short> · Instead of: <alternative, why not>`
 
+- 2026-10-03 · Pull request authors may merge after checking their changes · @gggnnnttt · Affects: team workflow · Why: the author owns the final review · Instead of: requiring a separate reviewer, which adds coordination overhead
