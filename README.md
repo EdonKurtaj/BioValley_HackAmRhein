@@ -16,6 +16,14 @@ From the repository root, run a deterministic hot-exposure scenario using locall
 PYTHONPATH=src python3 -m risk_assessment.cli --scenario hot --start-c 7 --duration-minutes 60 --tau-minutes 90
 ```
 
+Run the four-case factory dashboard simulation with:
+
+```sh
+PYTHONPATH=src python3 -m risk_assessment.cli --scenario all
+```
+
+The Normal, Buffer, Expedite, and Reroute triggers use explicit simulated route/ETA evidence; the live data freshness and disturbance findings are shown alongside them. No map or GPS trace is required to exercise the decision logic.
+
 Choose `--scenario cold` for a cold exposure, or use `--scenario observed-weather` to use a MeteoSwiss air-temperature observation as ambient context when the saved snapshot is no more than 30 minutes old. A stale or missing snapshot falls back to an explicitly illustrative 20 °C. Set `--ambient-c` to override the scenario ambient temperature. The package time constant is an illustrative input, not a qualified packaging property.
 
 Run the calculation checks with:

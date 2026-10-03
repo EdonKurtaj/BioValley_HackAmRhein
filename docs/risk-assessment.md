@@ -20,7 +20,7 @@ The saved requester samples are snapshots, not a representative historical basel
 
 ## Calculation
 
-The local Python engine is in `src/risk_assessment/`. It reads the requester's saved `latest.json` snapshots under `pythontest/data/`; absent, failed, or stale feeds remain unknown/context. It does not write to Supabase. For a first calculation, run `PYTHONPATH=src python3 -m risk_assessment.cli --scenario hot --start-c 7 --duration-minutes 60 --tau-minutes 90` from the repository root. The default hot/cold cases and route triggers are deterministic demo assumptions; `--ambient-c` can set a different scenario value. The engine reports action and evidence, not a probability or numeric risk score.
+The local Python engine is in `src/risk_assessment/`. It reads the requester's saved `latest.json` snapshots under `pythontest/data/`; absent, failed, or stale feeds remain unknown/context. It does not write to Supabase. For a first calculation, run `PYTHONPATH=src python3 -m risk_assessment.cli --scenario hot --start-c 7 --duration-minutes 60 --tau-minutes 90` from the repository root, or run `--scenario all` for a four-action dashboard demonstration. The default hot/cold cases and route triggers are deterministic demo assumptions; `--ambient-c` can set a different scenario value. The engine reports action and evidence, not a probability or numeric risk score.
 
 ### 1. Package temperature: measured first, modelled only for scenarios
 
@@ -74,7 +74,7 @@ Map only route-matched counter locations to the shipment’s simulated truck pat
 traffic_anomaly = (observed_count - baseline_median) / max(1.4826 × MAD, minimum_scale)
 ```
 
-Keep total count and relevant heavy/commercial categories as separate context features; validate each site’s class coverage and metadata first. A high count is **unusual traffic volume**, not proof of congestion. With simulated GPS, use route progress/observed speed or simulated ETA to calculate delay against the planned ETA. Use traffic anomaly to explain/warn; use delay/remaining slack to decide urgency.
+The local detector labels a high-volume anomaly at robust z ≥ 3 as a configurable demo watch threshold. Keep total count and relevant heavy/commercial categories as separate context features; validate each site’s class coverage and metadata first. A high count is **unusual traffic volume**, not proof of congestion. With simulated GPS, use route progress/observed speed or simulated ETA to calculate delay against the planned ETA. Use traffic anomaly to explain/warn; use delay/remaining slack to decide urgency.
 
 Basel-Stadt’s dataset describes motorized-individual-traffic counts and notes that full class data can be obtained in downloadable files; the current requester’s 10-row sample is not enough for a baseline. Collect several weeks (ideally seasonal coverage where feasible), retain site/direction/time, and handle the daylight-saving duplicated/missing hour as documented in the dataset.
 
@@ -111,6 +111,7 @@ Display thermal exposure, route status, slack, and chosen action as distinct, ex
 ## Current local implementation boundaries
 
 - The collector's saved MeteoSwiss snapshot can supply ambient context only while its fetch is current (30-minute demo freshness window); the package response remains simulated unless a temperature series is explicitly supplied.
+- Hourly traffic rows use a separate two-hour demo freshness window. This is a configurable prototype assumption pending confirmation of the dataset's update cadence.
 - The saved traffic response is summarized, but the current ten-record sample has no multiweek, same-counter baseline. `traffic_volume_anomaly` returns unknown until like-for-like counts are supplied; an available anomaly is still not treated as congestion or delay.
 - The Rhine helper uses the Basel-Rheinhalle level and Port high-water marks only when the caller names a matching ship-leg section. The Basel-Stadt gauge is shown separately; it is not converted. No low-water threshold is inferred.
 - Route actions accept explicit evidence and ETA/slack inputs. Weather, rainfall, or river readings alone do not silently add score penalties.

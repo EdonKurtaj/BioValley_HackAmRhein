@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .config import LOCAL_WEATHER_FRESHNESS_MINUTES
+from .config import LOCAL_WEATHER_FRESHNESS_MINUTES, TRAFFIC_FRESHNESS_MINUTES
 
 DEFAULT_DATA_DIR = Path(__file__).resolve().parents[2] / "pythontest" / "data"
 
@@ -61,9 +61,9 @@ def collect_local_context(data_dir: Path = DEFAULT_DATA_DIR) -> dict[str, Any]:
 
     traffic_data = traffic.get("data", {}) if traffic else {}
     traffic_results = traffic_data.get("results") or []
-    traffic_latest_age = _age_minutes(traffic_results[0].get("datetimefrom")) if traffic_results else None
+    traffic_latest_age = _age_minutes((traffic_results[0].get("datetimeto") or traffic_results[0].get("datetimefrom"))) if traffic_results else None
     traffic_context = {
-        "source_status": ("observed snapshot" if traffic_latest_age is not None and traffic_latest_age <= LOCAL_WEATHER_FRESHNESS_MINUTES else "stale")
+        "source_status": ("observed snapshot" if traffic_latest_age is not None and traffic_latest_age <= TRAFFIC_FRESHNESS_MINUTES else "stale")
         if traffic and traffic.get("request_ok") else "unknown",
         "latest_record_age_minutes": traffic_latest_age,
         "record_count": len(traffic_results),

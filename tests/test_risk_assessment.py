@@ -1,7 +1,11 @@
 import unittest
+import json
+import tempfile
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from risk_assessment.decision import decide_action
+from risk_assessment.disturbance import detect_traffic_disturbance
 from risk_assessment.interfaces import ExposureMetrics, RouteEvidence, TemperatureReading
 from risk_assessment.logistics import classify_rhine_high_water, traffic_volume_anomaly
 from risk_assessment.thermal import analyze_temperature_series, simulate_package_temperature, time_to_temperature_limit
@@ -84,6 +88,25 @@ class LogisticsTests(unittest.TestCase):
         self.assertEqual(classify_rhine_high_water(800, None).status, "unknown")
         self.assertEqual(classify_rhine_high_water(800, "basel_mittlere_bruecke_birsfelden").status, "restricted")
         self.assertEqual(classify_rhine_high_water(800, "rheinfelden_kembs").status, "pre_alert")
+
+    def test_fresh_route_matched_traffic_spike_is_detected_but_not_a_delay(self):
+        now = datetime.now(timezone.utc)
+        baseline = [90, 95, 100, 105, 110]
+        records = []
+        for weeks_back, count in enumerate(baseline, start=1):
+            stamp = now - timedelta(days=7 * weeks_back)
+            records.append({"sitecode": "counter-1", "datetimefrom": stamp.isoformat(), "directionname": "north",
+                            "lanecode": 1, "weekday": now.weekday(), "hourfrom": now.hour, "total": count})
+        records.append({"sitecode": "counter-1", "datetimefrom": now.isoformat(), "directionname": "north",
+                        "lanecode": 1, "weekday": now.weekday(), "hourfrom": now.hour, "total": 200})
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary) / "basel_dataset_100006"
+            directory.mkdir()
+            snapshot = {"request_ok": True, "data": {"results": records}}
+            (directory / "latest.json").write_text(json.dumps(snapshot), encoding="utf-8")
+            finding = detect_traffic_disturbance(Path(temporary))
+        self.assertEqual(finding.status, "detected")
+        self.assertIn("does not prove congestion", finding.action_effect)
 
 
 if __name__ == "__main__":
