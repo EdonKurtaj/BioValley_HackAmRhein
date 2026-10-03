@@ -208,6 +208,32 @@ class ObservedDataScoreTests(unittest.TestCase):
 
 
 class LogisticsTests(unittest.TestCase):
+    def test_future_source_times_cannot_trigger_current_weather_or_traffic(self):
+        now = datetime.now(timezone.utc)
+        future = (now + timedelta(hours=1)).isoformat()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            weather_dir = root / "meteoswiss_basel_temperature"
+            weather_dir.mkdir()
+            (weather_dir / "latest.json").write_text(json.dumps({
+                "request_ok": True, "checked_at": now.isoformat(),
+                "data": {"station": {"observed_at_utc": future, "age_minutes_at_fetch": 0,
+                         "measurements": {"tre200s0": 40, "rre150z0": 30, "fu3010z1": 120}}},
+            }), encoding="utf-8")
+            assessment = assess_observed_data(root, RouteEvidence(exposed_handling=True))
+            self.assertEqual(assessment["current_observations"]["weather"]["source_status"], "unknown")
+            self.assertIsNone(assessment["manufacturing_priority_score"]["components"][0]["contributed_points"])
+
+            match = TrafficCounterMatch("route-site", "north", 1)
+            records = [{"sitecode": "route-site", "directionname": "north", "lanecode": 1,
+                        "weekday": now.weekday(), "hourfrom": now.hour,
+                        "datetimefrom": (now - timedelta(weeks=index)).isoformat(), "total": count}
+                       for index, count in enumerate((90, 95, 100, 105, 110), 1)]
+            records.append({**records[0], "datetimefrom": future, "datetimeto": future, "total": 300})
+            finding = detect_traffic_disturbance(root, (match,),
+                                                  snapshot={"request_ok": True}, historical_records=records)
+            self.assertEqual(finding.status, "unknown")
+
     def test_ten_record_feed_is_not_a_traffic_baseline(self):
         result = traffic_volume_anomaly(100, [90, 95, 100])
         self.assertEqual(result.status, "unknown")

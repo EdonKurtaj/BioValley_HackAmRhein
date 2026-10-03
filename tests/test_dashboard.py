@@ -2,7 +2,10 @@
 
 from datetime import datetime, timedelta, timezone
 from http.server import ThreadingHTTPServer
+from contextlib import redirect_stdout
+from io import StringIO
 import json
+import sys
 from threading import Thread
 import unittest
 from unittest.mock import patch
@@ -11,7 +14,10 @@ from urllib.request import urlopen
 
 from risk_assessment.dashboard import demo_dashboard, live_dashboard
 from risk_assessment.demo import demo_fleet
-from risk_assessment.server import DashboardHandler, dashboard_request
+from risk_assessment.server import (
+    COLLECTOR_SCRIPT, PROJECT_ROOT, DashboardHandler, dashboard_request,
+    main as server_main, start_collector, stop_collector,
+)
 
 
 class DemoFleetTests(unittest.TestCase):
@@ -120,6 +126,13 @@ class LiveDashboardTests(unittest.TestCase):
         self.assertEqual(result["signals"][0]["freshness"], "stale")
         self.assertEqual(result["signals"][0]["severity"], "unknown")
 
+    def test_future_weather_is_unknown(self):
+        stamp = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        result = live_dashboard({"meteoswiss_basel_temperature": {"request_ok": True,
+                                "data": {"station": {"observed_at": stamp, "measurements": {"tre200s0": 40}}}}})
+        self.assertEqual(result["signals"][0]["freshness"], "unknown")
+        self.assertEqual(result["signals"][0]["severity"], "unknown")
+
     def test_failed_live_fetch_is_not_replaced_by_demo(self):
         with patch("risk_assessment.server.live_dashboard", side_effect=ValueError("unavailable")), \
                 patch("risk_assessment.server._live_cached", None):
@@ -162,6 +175,31 @@ class DashboardHTTPTests(unittest.TestCase):
         self.assertEqual(result.exception.code, 503)
         self.assertNotIn("provider detail", result.exception.read().decode())
         result.exception.close()
+
+    def test_server_collector_uses_the_running_python_and_stops_with_server(self):
+        with patch("risk_assessment.server.subprocess.Popen") as launch:
+            process = start_collector()
+        launch.assert_called_once_with([sys.executable, str(COLLECTOR_SCRIPT)], cwd=PROJECT_ROOT)
+        process.poll.return_value = None
+        stop_collector(process)
+        process.terminate.assert_called_once_with()
+        process.wait.assert_called_once_with(timeout=5)
+
+    def test_server_starts_collector_by_default_but_can_use_an_existing_one(self):
+        with patch("risk_assessment.server.ThreadingHTTPServer") as server, \
+                patch("risk_assessment.server.start_collector") as launch, \
+                patch("risk_assessment.server.stop_collector") as stop, \
+                patch("sys.argv", ["server.py"]), redirect_stdout(StringIO()):
+            server_main()
+        server.return_value.serve_forever.assert_called_once_with()
+        launch.assert_called_once_with()
+        stop.assert_called_once_with(launch.return_value)
+
+        with patch("risk_assessment.server.ThreadingHTTPServer"), \
+                patch("risk_assessment.server.start_collector") as launch, \
+                patch("sys.argv", ["server.py", "--no-collector"]), redirect_stdout(StringIO()):
+            server_main()
+        launch.assert_not_called()
 
 
 if __name__ == "__main__":

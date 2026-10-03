@@ -50,7 +50,8 @@ def _age_minutes(timestamp: str | None) -> float | None:
         return None
     if observed.tzinfo is None or observed.utcoffset() is None:
         return None
-    return max(0.0, (datetime.now(timezone.utc) - observed.astimezone(timezone.utc)).total_seconds() / 60)
+    age = (datetime.now(timezone.utc) - observed.astimezone(timezone.utc)).total_seconds() / 60
+    return age if age >= 0 else None
 
 
 def read_snapshot(data_dir: Path, source_id: str) -> dict[str, Any] | None:
@@ -90,11 +91,10 @@ def collect_local_context(
         checked_at = weather_snapshot.get("checked_at")
         snapshot_age_minutes = _age_minutes(checked_at)
         observation_age_minutes = _age_minutes(station.get("observed_at_utc") or station.get("observed_at"))
-        if observation_age_minutes is None and station.get("age_minutes_at_fetch") is not None:
-            try:
-                observation_age_minutes = max(0.0, float(station["age_minutes_at_fetch"]) + (snapshot_age_minutes or 0.0))
-            except (TypeError, ValueError):
-                observation_age_minutes = None
+        weather_status = "unavailable"
+        if weather_snapshot.get("request_ok"):
+            weather_status = ("unknown" if observation_age_minutes is None else
+                              "observed" if observation_age_minutes <= LOCAL_WEATHER_FRESHNESS_MINUTES else "stale")
         weather = {
             "observed_at": station.get("observed_at"),
             "age_minutes_at_fetch": station.get("age_minutes_at_fetch"),
@@ -103,16 +103,17 @@ def collect_local_context(
             "station_id": station.get("station_id"),
             "measurements": station.get("measurements") or {},
             "storage": weather_snapshot.get("storage", "local archive"),
-            "source_status": ("observed" if observation_age_minutes is not None and observation_age_minutes <= LOCAL_WEATHER_FRESHNESS_MINUTES else "stale")
-            if weather_snapshot.get("request_ok") else "unavailable",
+            "source_status": weather_status,
         }
 
     traffic_data = (traffic.get("data") or {}) if traffic else {}
     traffic_results = traffic_data.get("results") or []
     traffic_latest_age = _age_minutes((traffic_results[0].get("datetimeto") or traffic_results[0].get("datetimefrom"))) if traffic_results else None
+    traffic_status = "unknown"
+    if traffic and traffic.get("request_ok") and traffic_latest_age is not None:
+        traffic_status = "observed snapshot" if traffic_latest_age <= TRAFFIC_FRESHNESS_MINUTES else "stale"
     traffic_context = {
-        "source_status": ("observed snapshot" if traffic_latest_age is not None and traffic_latest_age <= TRAFFIC_FRESHNESS_MINUTES else "stale")
-        if traffic and traffic.get("request_ok") else "unknown",
+        "source_status": traffic_status,
         "latest_record_age_minutes": traffic_latest_age,
         "record_count": len(traffic_results),
         "total_count": traffic_data.get("total_count"),

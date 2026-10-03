@@ -99,7 +99,7 @@ On Windows PowerShell, use the launcher:
 
 If your Python executable has a different name or path, pass `-Python <interpreter>`. The Windows launcher keeps TLS verification enabled and uses the installed Git CA bundle when an MSYS Python build lacks a default certificate file. It changes only that process environment.
 
-Open [the local dashboard](http://127.0.0.1:8000). The server uses Python's standard library and serves both the built frontend and `GET /api/dashboard`. It binds to loopback by default; this is a local demo server, not an authenticated public deployment.
+Open [the local dashboard](http://127.0.0.1:8000). The server uses Python's standard library and serves both the built frontend and `GET /api/dashboard`. It binds to loopback by default; this is a local demo server, not an authenticated public deployment. Starting the server also starts the existing collector with the same Python executable. It fetches sources immediately and then every ten minutes, saving to Supabase when the local `.env` is configured. The Live screen polls every minute; its API response may stay cached for up to one minute. A fresh fetch cannot make an older source measurement current. The collector stops with the server. Use `--no-collector` when a separate collector is already running.
 
 For frontend development, leave the backend running and start Vite in a second terminal:
 

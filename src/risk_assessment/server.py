@@ -7,6 +7,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import mimetypes
 from pathlib import Path
+import subprocess
+import sys
 from threading import Lock
 from time import monotonic
 from urllib.parse import parse_qs, urlsplit
@@ -16,6 +18,7 @@ from .decision import parse_time
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 FRONTEND_DIST = PROJECT_ROOT / "frontend" / "dist"
+COLLECTOR_SCRIPT = PROJECT_ROOT / "pythontest" / "api_requester.py"
 LIVE_CACHE_SECONDS = 60
 DEMO_ANCHOR = datetime.now(timezone.utc).replace(microsecond=0)
 _live_lock = Lock()
@@ -102,19 +105,45 @@ class DashboardHandler(BaseHTTPRequestHandler):
         pass
 
 
+def start_collector() -> subprocess.Popen:
+    """Poll public sources and save them through the existing collector while the server runs."""
+    return subprocess.Popen([sys.executable, str(COLLECTOR_SCRIPT)], cwd=PROJECT_ROOT)
+
+
+def stop_collector(process: subprocess.Popen | None) -> None:
+    """Stop the child collector when the local dashboard server exits."""
+    if process is None or process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--no-collector", action="store_true", help="use a separately running collector")
     args = parser.parse_args()
     server = ThreadingHTTPServer((args.host, args.port), DashboardHandler)
+    collector = None
     print(f"BioValley dashboard: http://{args.host}:{args.port}", flush=True)
     try:
+        if not args.no_collector:
+            try:
+                collector = start_collector()
+                print("Live source polling started; updates appear after collection and the next dashboard refresh.", flush=True)
+            except OSError as exc:
+                print(f"Live source polling could not start: {exc}", flush=True)
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
         server.server_close()
+        stop_collector(collector)
 
 
 if __name__ == "__main__":

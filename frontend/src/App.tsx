@@ -95,6 +95,7 @@ export default function App() {
   }, [playing, mode, !!snapshot, error]);
 
   function restart(nextScenario = scenario) {
+    setPlaying(false);
     elapsed.current = 0;
     setAnchor(new Date().toISOString());
     setScenario(nextScenario);
@@ -104,6 +105,7 @@ export default function App() {
 
   function switchMode(next: FeedMode) {
     if (next === mode) return;
+    setPlaying(false);
     setSnapshot(null);
     setSelectedLocationId(null);
     setMode(next);

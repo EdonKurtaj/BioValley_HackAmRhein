@@ -12,6 +12,8 @@ from .config import (
     OPEN_TRAFFIC_WEIGHT,
     OPEN_URGENCY_WEIGHT,
     OPEN_WEATHER_WEIGHT,
+    RHINE_PRE_ALERT_CM,
+    RHINE_RESTRICTION_CM,
     TRAFFIC_ANOMALY_THRESHOLD,
 )
 from .disturbance import detect_open_data_disturbances, detect_traffic_disturbance, score_weather_context
@@ -37,8 +39,8 @@ def _rhine_severity(level_cm: float | None, segment: str | None, status: str) ->
         return 100.0
     if level_cm is None or segment is None:
         return None
-    restriction = 790.0 if segment == "basel_mittlere_bruecke_birsfelden" else 820.0
-    return round(25.0 + 75.0 * (level_cm - 700.0) / (restriction - 700.0), 1)
+    restriction = RHINE_RESTRICTION_CM[segment]
+    return round(25.0 + 75.0 * (level_cm - RHINE_PRE_ALERT_CM) / (restriction - RHINE_PRE_ALERT_CM), 1)
 
 
 def _format_age(age_minutes: float | None) -> str:

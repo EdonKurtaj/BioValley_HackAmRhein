@@ -3,7 +3,11 @@
 from datetime import datetime, timezone
 from math import isfinite
 
-from .config import LOCAL_WEATHER_FRESHNESS_MINUTES, PORT_GAUGE_FRESHNESS_MINUTES, ROAD_EVENT_FRESHNESS_MINUTES
+from .config import (
+    COLD_AMBIENT_ONSET_C, HOT_AMBIENT_ONSET_C, LOCAL_WEATHER_FRESHNESS_MINUTES,
+    PORT_GAUGE_FRESHNESS_MINUTES, RHINE_PRE_ALERT_CM, ROAD_EVENT_FRESHNESS_MINUTES,
+    STRONG_GUST_ONSET_KMH,
+)
 from .demo import demo_fleet
 from .local_data import collect_local_context
 from .supabase_data import fetch_supabase_sources
@@ -56,8 +60,10 @@ def live_dashboard(sources=None, *, now=None) -> dict:
     context = collect_local_context(source_snapshots=sources)
     weather = context.get("weather") or {}
     weather_at = weather.get("observed_at")
-    weather_freshness = (_freshness(weather_at, now, LOCAL_WEATHER_FRESHNESS_MINUTES)
-                         if weather.get("source_status") == "observed" else "stale" if weather_at else "unknown")
+    weather_freshness = _freshness(weather_at, now, LOCAL_WEATHER_FRESHNESS_MINUTES)
+    if weather.get("source_status") == "unavailable" or (
+            weather.get("source_status") != "observed" and weather_freshness == "current"):
+        weather_freshness = "unknown"
     values = weather.get("measurements") or {}
     temperature = _number(values.get("tre200s0"))
     gust = _number(values.get("fu3010z1"))
@@ -105,13 +111,13 @@ def live_dashboard(sources=None, *, now=None) -> dict:
     current_event_count = sum(alert["freshness"] == "current" for alert in alerts)
     signals = [
         _signal("temperature", "Lufttemperatur", temperature, "°C", weather_at, weather_freshness,
-                "MeteoSwiss · Supabase", "Basel/Binningen · Umgebung, kein Paketsensor", temperature is not None and (temperature >= 30 or temperature <= 0)),
+                "MeteoSwiss · Supabase", "Basel/Binningen · Umgebung, kein Paketsensor", temperature is not None and (temperature >= HOT_AMBIENT_ONSET_C or temperature <= COLD_AMBIENT_ONSET_C)),
         _signal("traffic", "Verkehrsmeldungen", current_event_count if road_freshness == "current" else None, "aktuell", road_at,
                 road_freshness, "OpenTransportData · Supabase", "Regionale Kandidaten, kein automatischer Routenbezug", current_event_count > 0),
         _signal("gust", "Windböen", gust, "km/h", weather_at, weather_freshness,
-                "MeteoSwiss · Supabase", "Kontext für exponierten Umschlag", gust is not None and gust >= 60),
+                "MeteoSwiss · Supabase", "Kontext für exponierten Umschlag", gust is not None and gust >= STRONG_GUST_ONSET_KMH),
         _signal("rhine", "Rheinpegel", level, "cm", port_at, port_freshness,
-                "Port of Switzerland · Supabase", "Basel-Rheinhalle · betrifft passende Schiffsabschnitte", level is not None and level >= 700),
+                "Port of Switzerland · Supabase", "Basel-Rheinhalle · betrifft passende Schiffsabschnitte", level is not None and level >= RHINE_PRE_ALERT_CM),
     ]
     return {"mode": "live", "updatedAt": now.isoformat(), "locations": [*MAP_LOCATIONS, *event_locations],
             "signals": signals, "alerts": alerts[:30], "shipments": [], "simulation": None,
@@ -126,7 +132,7 @@ def demo_dashboard(anchor: datetime, elapsed_minutes=0, scenario="fleet") -> dic
     alerts = [{"id": f"jam-{shipment['id']}", "title": f"Stau · {shipment['routeName']}",
                "detail": f"Simulierte Verzögerung {shipment['delayMinutes']:g} min · {shipment['id']}",
                "kind": "traffic", "observedAt": stamp, "freshness": "current"} for shipment in delays]
-    if air >= 30:
+    if air >= HOT_AMBIENT_ONSET_C:
         alerts.append({"id": "heat", "title": "Hohe Außentemperatur", "detail": "Simuliert · Kühlung und Umschlagfenster prüfen; Paketmessung bleibt separat.",
                        "kind": "weather", "observedAt": stamp, "freshness": "current"})
     locations = [*MAP_LOCATIONS, *[{"id": alert["id"], "name": alert["title"], "category": "traffic",
@@ -134,7 +140,7 @@ def demo_dashboard(anchor: datetime, elapsed_minutes=0, scenario="fleet") -> dic
                                   "description": alert["detail"]} for shipment, alert in zip(delays, alerts)]]
     return {"mode": "demo", **fleet, "locations": locations, "alerts": alerts,
             "signals": [
-                _signal("temperature", "Lufttemperatur", air, "°C", stamp, "current", "Demo-Wetter", "Synthetisches Umgebungssignal", air >= 30),
+                _signal("temperature", "Lufttemperatur", air, "°C", stamp, "current", "Demo-Wetter", "Synthetisches Umgebungssignal", air >= HOT_AMBIENT_ONSET_C),
                 _signal("traffic", "Routenstörungen", len(delays), "Stau", stamp, "current", "Demo-Verkehr", "Explizit den Demo-LKW zugeordnet", bool(delays)),
                 _signal("gust", "Windböen", 12, "km/h", stamp, "current", "Demo-Wetter", "Synthetische Messung"),
                 _signal("rhine", "Rheinpegel", 479, "cm", stamp, "current", "Demo-Pegel", "Kontext · kein Einfluss auf Demo-LKW"),

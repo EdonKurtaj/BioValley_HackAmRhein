@@ -7,7 +7,7 @@ from math import isfinite
 from statistics import median
 from typing import Literal, Sequence
 
-from .config import MIN_TRAFFIC_BASELINE_SIZE, TRAFFIC_MINIMUM_SCALE
+from .config import MIN_TRAFFIC_BASELINE_SIZE, RHINE_PRE_ALERT_CM, RHINE_RESTRICTION_CM, TRAFFIC_MINIMUM_SCALE
 
 @dataclass(frozen=True)
 class TrafficAnomaly:
@@ -57,15 +57,15 @@ def classify_rhine_high_water(
     """Apply Port of Switzerland marks only to an explicitly matching ship leg."""
     if water_level_cm is None or not isfinite(water_level_cm):
         return RhineStatus("unknown", route_segment, water_level_cm, "Port gauge reading is missing or invalid.")
-    if route_segment not in ("basel_mittlere_bruecke_birsfelden", "rheinfelden_kembs"):
+    if route_segment not in RHINE_RESTRICTION_CM:
         return RhineStatus("unknown", route_segment, water_level_cm,
                            "No matching ship-leg segment was supplied; the gauge cannot trigger this shipment.")
-    restriction_level = 790 if route_segment == "basel_mittlere_bruecke_birsfelden" else 820
+    restriction_level = RHINE_RESTRICTION_CM[route_segment]
     if water_level_cm >= restriction_level:
         return RhineStatus("restricted", route_segment, water_level_cm,
-                           f"Port high-water mark {restriction_level} cm reached for this segment.")
-    if water_level_cm >= 700:
+                           f"Port high-water mark {restriction_level:g} cm reached for this segment.")
+    if water_level_cm >= RHINE_PRE_ALERT_CM:
         return RhineStatus("pre_alert", route_segment, water_level_cm,
-                           "Port high-water pre-alert mark 700 cm reached; this is not by itself a closure.")
+                           f"Port high-water pre-alert mark {RHINE_PRE_ALERT_CM:g} cm reached; this is not by itself a closure.")
     return RhineStatus("no_high_water_trigger", route_segment, water_level_cm,
                        "Below the Port high-water pre-alert; no low-water capacity rule is inferred.")

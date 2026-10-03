@@ -40,6 +40,13 @@ HEAVY_RAIN_MAX_MM_10MIN = 30.0
 STRONG_GUST_ONSET_KMH = 60.0
 STRONG_GUST_MAX_KMH = 120.0
 
+# Port of Switzerland Basel-Rheinhalle high-water marks (see docs/SOURCES.md).
+RHINE_PRE_ALERT_CM = 700.0
+RHINE_RESTRICTION_CM = {
+    "basel_mittlere_bruecke_birsfelden": 790.0,
+    "rheinfelden_kembs": 820.0,
+}
+
 # Illustrative UI scenario assumption only; replace with factory operating slack.
 DEFAULT_BUFFER_HOURS = 4.0
 DEFAULT_SENSOR_MAX_GAP = timedelta(minutes=15)

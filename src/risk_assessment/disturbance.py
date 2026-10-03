@@ -110,7 +110,8 @@ def _observation_age_minutes(timestamp: str | None) -> float | None:
         return None
     if observed.tzinfo is None or observed.utcoffset() is None:
         return None
-    return max(0.0, (datetime.now(timezone.utc) - observed.astimezone(timezone.utc)).total_seconds() / 60)
+    age = (datetime.now(timezone.utc) - observed.astimezone(timezone.utc)).total_seconds() / 60
+    return age if age >= 0 else None
 
 
 def detect_traffic_disturbance(

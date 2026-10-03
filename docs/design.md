@@ -10,9 +10,9 @@ Switch to Live mode to retrieve saved environmental observations from Supabase t
 
 ## Architecture
 
-`frontend/` is an independent Vite React application. The existing Python collection code and Supabase schema remain separately runnable. UI components consume the map data adapter; they never access the database or ingestion files directly. The shared contract lives in [interfaces.ts](../frontend/src/interfaces.ts).
+`frontend/` is an independent Vite React application. The existing Python collection code and Supabase schema remain separately runnable. UI components consume the validated dashboard response; they never access the database or ingestion files directly. The shared contract lives in [interfaces.ts](../frontend/src/interfaces.ts).
 
-The local Python HTTP server reuses the existing thermal exposure, priority and decision functions and implements GET /api/dashboard. Demo replay inputs live in config/demo-transports.json. Map interpolation only animates provided route geometry; it does not calculate risk. The server also serves the built frontend. Vite proxies /api to the server in development. Database credentials stay on the server.
+The local Python HTTP server reuses the existing thermal exposure, priority and decision functions and implements GET /api/dashboard. It starts the existing collector for periodic source refresh while it runs. Demo replay inputs live in config/demo-transports.json. Map interpolation only animates provided route geometry; it does not calculate risk. The server also serves the built frontend. Vite proxies /api to the server in development. Database credentials stay on the server.
 
 ## Out of scope
 
