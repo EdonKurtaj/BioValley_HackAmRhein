@@ -10,17 +10,19 @@ A Basel-area factory needs a critical refrigerated material on time while preser
 
 ## How to run it
 
-From the repository root, run the saved open-data observations only. This is the default and does not simulate package temperature, traffic, or ETA:
+From the repository root, run the latest saved open-data observations only. By default, the risk assessment reads MeteoSwiss weather rows from Supabase; Rhine and traffic context still come from the collector's local archives. This does not simulate package temperature, traffic, or ETA:
 
 ```sh
 PYTHONPATH=src python3 -m risk_assessment.cli
 ```
 
-The collector keeps local archives and also stores measurements in Supabase when the local `.env` is configured. See [collector setup](pythontest/README.md) and [database setup](supabase/README.md). The risk engine reads those same local archives; decision persistence is not implemented. Refresh observations before assessment (a successful fetch cannot make delayed source measurements current):
+The collector keeps local archives and stores measurements in Supabase when the local `.env` is configured. The assessment selects the newest MeteoSwiss station batch from `observations` and checks freshness from its source `observed_at` timestamp. Decision persistence is not implemented. See [collector setup](pythontest/README.md) and [database setup](supabase/README.md). Refresh observations before assessment (a successful fetch cannot make delayed source measurements current):
 
 ```sh
 python3 pythontest/api_requester.py --once
 ```
+
+For an offline assessment using the local weather archive, pass `--weather-source local`. This changes only the weather input; traffic, Rhine and road evidence keep using their existing archive paths.
 
 The regular collector also fetches OpenTransportData road situations and Basel-area counter readings. It saves a combined source snapshot and counter-minute history alongside the existing per-source archives. For minute-by-minute traffic polling by itself, run:
 
@@ -44,7 +46,7 @@ PYTHONPATH=src python3 -m risk_assessment.cli --scenario all
 
 The Normal, Buffer, Expedite, Reroute, and combined cases use explicit simulated route/ETA evidence. The observed-data score appears separately. No map or GPS trace is required to exercise the decision logic.
 
-Choose `--scenario cold` for a cold exposure, or use `--scenario observed-weather` to simulate package response to the saved MeteoSwiss air temperature when the observation is no more than 30 minutes old. Stale or missing weather does not enter the observed-only score. Set `--ambient-c` to override the scenario ambient temperature. The package time constant is an illustrative input, not a qualified packaging property.
+Choose `--scenario cold` for a cold exposure, or use `--scenario observed-weather` to simulate package response to the latest MeteoSwiss air temperature from the selected weather store when the observation is no more than 30 minutes old. Stale or missing weather does not enter the observed-only score. Set `--ambient-c` to override the scenario ambient temperature. The package time constant is an illustrative input, not a qualified packaging property.
 
 Run the calculation checks with:
 
@@ -109,7 +111,7 @@ See [docs/SOURCES.md](docs/SOURCES.md).
 
 ## Limits
 
-Scenario package temperatures are simulated. Saved local weather is a regional observation, not a box sensor; the current ten-record traffic sample is not a route baseline; and river restrictions require a matching ship-leg section. The model has no product-specific stability rules and cannot decide whether goods are safe or damaged. It is a planning demo, not an operational or quality-release system.
+Scenario package temperatures are simulated. Supabase weather is a regional observation, not a box sensor; the current ten-record traffic sample is not a route baseline; and river restrictions require a matching ship-leg section. The model has no product-specific stability rules and cannot decide whether goods are safe or damaged. It is a planning demo, not an operational or quality-release system.
 
 ## Team
 

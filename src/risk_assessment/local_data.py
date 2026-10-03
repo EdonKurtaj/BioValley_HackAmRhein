@@ -66,9 +66,13 @@ def read_snapshot(data_dir: Path, source_id: str) -> dict[str, Any] | None:
     return value
 
 
-def collect_local_context(data_dir: Path = DEFAULT_DATA_DIR) -> dict[str, Any]:
-    """Summarize locally saved observations; unavailable feeds remain unknown."""
-    weather_snapshot = read_snapshot(data_dir, "meteoswiss_basel_temperature")
+def collect_local_context(
+    data_dir: Path = DEFAULT_DATA_DIR,
+    weather_snapshot: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Summarize saved observations; an explicit weather snapshot overrides local weather."""
+    if weather_snapshot is None:
+        weather_snapshot = read_snapshot(data_dir, "meteoswiss_basel_temperature")
     traffic = read_snapshot(data_dir, "basel_dataset_100006")
     rhine = read_snapshot(data_dir, "basel_dataset_100089")
     port = read_snapshot(data_dir, "port_pegel_clean")
@@ -91,6 +95,7 @@ def collect_local_context(data_dir: Path = DEFAULT_DATA_DIR) -> dict[str, Any]:
             "snapshot_age_minutes": snapshot_age_minutes,
             "station_id": station.get("station_id"),
             "measurements": station.get("measurements") or {},
+            "storage": weather_snapshot.get("storage", "local archive"),
             "source_status": ("observed" if observation_age_minutes is not None and observation_age_minutes <= LOCAL_WEATHER_FRESHNESS_MINUTES else "stale")
             if weather_snapshot.get("request_ok") else "unavailable",
         }

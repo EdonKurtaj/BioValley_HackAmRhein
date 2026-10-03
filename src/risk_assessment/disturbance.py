@@ -170,11 +170,11 @@ def detect_traffic_disturbance(
 
 def detect_open_data_disturbances(
     data_dir: Path = DEFAULT_DATA_DIR, route_counters: tuple[TrafficCounterMatch, ...] = (),
-    route_segment: str | None = None,
+    route_segment: str | None = None, context: dict | None = None,
 ) -> list[dict]:
     """Return data-supported events; environmental context is not a package excursion."""
     traffic = detect_traffic_disturbance(data_dir, route_counters)
-    context = collect_local_context(data_dir)
+    context = context if context is not None else collect_local_context(data_dir)
     weather = context.get("weather") or {}
     rhine = context.get("rhine") or {}
     weather_status = weather.get("source_status", "unknown")

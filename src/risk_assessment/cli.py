@@ -18,6 +18,7 @@ from .local_data import DEFAULT_DATA_DIR, collect_local_context, read_snapshot
 from .observed import assess_observed_data, render_observed_summary
 from .priority import calculate_priority_score
 from .thermal import analyze_temperature_series, simulate_package_temperature, time_to_temperature_limit
+from .supabase_weather import fetch_latest_weather_snapshot
 
 
 def parse_traffic_counters(values: list[str]) -> tuple[TrafficCounterMatch, ...]:
@@ -55,12 +56,25 @@ def parse_road_events(values: list[str]) -> tuple[RoadEventMatch, ...]:
     return tuple(matches)
 
 
+def _weather_snapshot_for(args: argparse.Namespace) -> dict | None:
+    """Load the selected weather store once per CLI invocation."""
+    if args.weather_source == "local":
+        return None
+    snapshot = getattr(args, "_weather_snapshot", None)
+    if snapshot is None:
+        snapshot = fetch_latest_weather_snapshot()
+        args._weather_snapshot = snapshot
+    return snapshot
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scenario", choices=("observed", "hot", "cold", "normal", "observed-weather", "combined", "rain", "traffic", "rhine",
                                                 "buffer", "expedite", "reroute", "stale", "all"), default="observed",
                         help="Default: score saved observations only. Other scenarios explicitly simulate inputs.")
     parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
+    parser.add_argument("--weather-source", choices=("supabase", "local"), default="supabase",
+                        help="Observed assessment weather source (default: latest MeteoSwiss rows in Supabase)")
     parser.add_argument("--output-format", choices=("table", "json"), default="table",
                         help="Use a readable terminal summary (default) or machine-readable JSON")
     parser.add_argument("--start-c", type=float, default=7.0)
@@ -92,7 +106,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def run(args: argparse.Namespace) -> dict:
-    context = collect_local_context(args.data_dir)
+    context = collect_local_context(args.data_dir, _weather_snapshot_for(args))
     weather = context.get("weather") or {}
     weather_readings = weather.get("measurements", {})
     weather_current = weather.get("source_status") == "observed"
@@ -222,8 +236,8 @@ def run(args: argparse.Namespace) -> dict:
         "system_suggestion": suggestion,
         "traffic_anomaly": traffic_result.__dict__ if traffic_result else None,
         "rhine_status": rhine_status.__dict__ if rhine_status else None,
-        "detected_open_data_disturbances": detect_open_data_disturbances(args.data_dir),
-        "local_observed_context": context,
+        "detected_open_data_disturbances": detect_open_data_disturbances(args.data_dir, context=context),
+        "observed_context": context,
         "limitations": ["Scenario package temperatures are simulated, not measured.",
                         "The priority score is a configurable prototype index, not a calibrated probability or product-quality verdict.",
                         "The score weights are illustrative; use shipment outcomes and factory review to calibrate them before operational use.",
@@ -236,6 +250,7 @@ def run(args: argparse.Namespace) -> dict:
 
 def run_demo_suite_data(args: argparse.Namespace) -> dict:
     """Return structured scenario results suitable for later dashboard use."""
+    _weather_snapshot_for(args)
     now = datetime.now(timezone.utc)
     specifications = [
         ("Normal", "normal", now + timedelta(hours=2), now + timedelta(hours=8)),
@@ -257,13 +272,15 @@ def run_demo_suite_data(args: argparse.Namespace) -> dict:
         outcome = run(case)
         outcomes.append((label, outcome))
 
-    context = outcomes[0][1]["local_observed_context"]
-    disturbances = outcomes[0][1]["detected_open_data_disturbances"]
+    observed = run_observed(args)
+    context = outcomes[0][1]["observed_context"]
+    context["weather"] = observed["current_observations"]["weather"]
+    disturbances = observed["detected_open_data_disturbances"]
     return {
-        "mode": "local observed context plus explicitly simulated scenario results",
+        "mode": "stored observed context plus explicitly simulated scenario results",
         "pipeline": ["Open data", "Disturbance detection", "Risk assessment", "Manufacturing decision", "Factory dashboard"],
-        "current_observed_assessment": run_observed(args),
-        "local_observed_context": context,
+        "current_observed_assessment": observed,
+        "observed_context": context,
         "detected_open_data_disturbances": disturbances,
         "scenarios": [
             {
@@ -286,7 +303,7 @@ def run_demo_suite(args: argparse.Namespace, results: dict | None = None) -> str
     """Render all decision paths beside current local data for terminal review."""
     results = results or run_demo_suite_data(args)
     outcomes = [(item["label"], item) for item in results["scenarios"]]
-    context = results["local_observed_context"]
+    context = results["observed_context"]
     disturbances = results["detected_open_data_disturbances"]
     observed_score = results["current_observed_assessment"]["manufacturing_priority_score"]
     weather = context.get("weather") or {}
@@ -294,11 +311,11 @@ def run_demo_suite(args: argparse.Namespace, results: dict | None = None) -> str
     traffic = context.get("traffic") or {}
     rhine = context.get("rhine") or {}
     lines = [
-        "FACTORY DASHBOARD — local scenario demo",
+        "FACTORY DASHBOARD — scenario demo",
         "Open data → Disturbance detection → Risk assessment → Manufacturing decision → Dashboard",
         "",
-        "LIVE LOCAL INPUTS",
-        f"- Weather: {weather.get('source_status', 'unknown')}; BAS air temperature {measurements.get('tre200s0', 'unknown')} °C.",
+        "LATEST STORED INPUTS",
+        f"- Weather ({weather.get('storage', 'unknown')}): {weather.get('source_status', 'unknown')}; BAS air temperature {measurements.get('tre200s0', 'unknown')} °C.",
         f"- Traffic: {traffic.get('source_status', 'unknown')}; {traffic.get('record_count', 0)} rows; baseline available: {traffic.get('baseline_available', False)}.",
         f"- Rhine: {rhine.get('source_status', 'unknown')}; Port gauge {((rhine.get('port_basel_rheinhalle') or {}).get('value', 'unknown'))} cm.",
         "",
@@ -397,7 +414,7 @@ def main() -> int:
 
 
 def run_observed(args: argparse.Namespace) -> dict:
-    """Score currently saved public observations and optional caller ETA/route metadata."""
+    """Score current weather from the selected store plus saved public/route observations."""
     route = RouteEvidence(
         disruption_observed={"clear": False, "disrupted": True, "unknown": None}.get(args.route_status),
         alternate_route_available=args.alternate_route_available,
@@ -411,7 +428,10 @@ def run_observed(args: argparse.Namespace) -> dict:
         alternate_route_suitable=args.alternate_route_suitable,
         alternate_arrival_at=parse_time(args.alternate_eta_at),
     )
-    return assess_observed_data(args.data_dir, route, args.rhine_route_segment)
+    weather_snapshot = _weather_snapshot_for(args)
+    result = assess_observed_data(args.data_dir, route, args.rhine_route_segment, weather_snapshot)
+    result["weather_source"] = "Supabase observations" if args.weather_source == "supabase" else "local archive"
+    return result
 
 
 if __name__ == "__main__":

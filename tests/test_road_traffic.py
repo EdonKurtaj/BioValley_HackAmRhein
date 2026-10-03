@@ -145,7 +145,8 @@ class RoadTrafficTests(unittest.TestCase):
 
     def test_cli_and_missing_evidence_bounds(self):
         self.save()
-        args = build_parser().parse_args(["--data-dir", str(self.root), "--road-counter", "detector|light|80"])
+        args = build_parser().parse_args(["--data-dir", str(self.root), "--weather-source", "local",
+                                          "--road-counter", "detector|light|80"])
         result = run_observed(args)
         score = result["manufacturing_priority_score"]
         self.assertEqual(score["score"], 5)

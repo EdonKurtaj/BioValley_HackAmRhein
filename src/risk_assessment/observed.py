@@ -70,6 +70,7 @@ def assess_observed_data(
     data_dir: Path = DEFAULT_DATA_DIR,
     route: RouteEvidence | None = None,
     route_segment: str | None = None,
+    weather_snapshot: dict | None = None,
 ) -> dict:
     """Return a current-data score; stale and route-unmatched inputs stay excluded."""
     route = route or RouteEvidence()
@@ -78,7 +79,7 @@ def assess_observed_data(
     for timestamp in (route.estimated_arrival_at, route.material_needed_at):
         if timestamp is not None and (timestamp.tzinfo is None or timestamp.utcoffset() is None):
             raise ValueError("logistics timestamps must include a timezone")
-    context = collect_local_context(data_dir)
+    context = collect_local_context(data_dir, weather_snapshot)
     weather = context.get("weather") or {}
     weather_signal = score_weather_context(weather.get("measurements") or {})
     weather_signal = {
@@ -293,7 +294,7 @@ def assess_observed_data(
                       "finding": rhine_status.__dict__},
         },
         "detected_open_data_disturbances": [
-            *detect_open_data_disturbances(data_dir, route.traffic_counters, route_segment),
+            *detect_open_data_disturbances(data_dir, route.traffic_counters, route_segment, context),
             {"source": "OpenTransportData road traffic",
              "status": "unknown" if road.severity is None else "detected" if road.severity > 0 else "no_anomaly",
              "summary": "Verified route evidence; severity is a policy index, not predicted delay.",
@@ -323,7 +324,7 @@ def render_observed_summary(result: dict) -> str:
         refresh_note = ""
     lines = [
         "CURRENT OPEN-DATA ASSESSMENT — no simulation",
-        f"Weather: {weather.get('source_status', 'unknown')} ({_format_age(weather.get('observation_age_minutes'))}); "
+        f"Weather ({weather.get('storage', 'unknown')}): {weather.get('source_status', 'unknown')} ({_format_age(weather.get('observation_age_minutes'))}); "
         f"{measurements.get('tre200s0', 'unknown')} °C, "
         f"{measurements.get('rre150z0', 'unknown')} mm/10 min rain, gust {measurements.get('fu3010z1', 'unknown')} km/h; "
         f"last-observation context severity {observations['weather_score_details']['last_observation_severity'] if observations['weather_score_details']['last_observation_severity'] is not None else 'unknown'}/100; "
