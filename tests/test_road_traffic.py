@@ -6,9 +6,11 @@ import unittest
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from risk_assessment.cli import build_parser, run_observed
-from risk_assessment.interfaces import RoadCounterMatch, RoadEventMatch, RouteEvidence
+from risk_assessment.disturbance import Disturbance
+from risk_assessment.interfaces import RoadCounterMatch, RoadEventMatch, RouteEvidence, TrafficCounterMatch
 from risk_assessment.observed import assess_observed_data
 from risk_assessment.road_traffic import assess_road_traffic
 
@@ -159,6 +161,33 @@ class RoadTrafficTests(unittest.TestCase):
         self.assertEqual(assess_observed_data(self.root, route)["action"]["recommendation"], "buffer")
         route = replace(route, material_needed_at=self.now + timedelta(hours=2))
         self.assertEqual(assess_observed_data(self.root, route)["action"]["recommendation"], "expedite")
+
+    def test_available_road_speed_does_not_hide_selected_missing_count_baseline(self):
+        self.save()
+        route = replace(self.route, traffic_counters=(TrafficCounterMatch("site", "North", 1),))
+        result = assess_observed_data(self.root, route)
+        traffic = next(item for item in result["manufacturing_priority_score"]["components"] if item["name"] == "traffic")
+        self.assertIsNone(traffic["contributed_points"])
+        self.assertEqual(result["manufacturing_priority_score"]["evidence_coverage"]["available"], 0)
+        self.assertEqual(result["manufacturing_priority_score"]["maximum"], 100)
+
+    def test_normal_count_does_not_hide_selected_missing_road_counter(self):
+        self.save()
+        route = replace(self.route, road_counters=(RoadCounterMatch("missing", "light", 80),),
+                        traffic_counters=(TrafficCounterMatch("site", "North", 1),))
+        finding = Disturbance("traffic", "no_anomaly", "Comparable count is normal", (), "none", robust_z=0)
+        with patch("risk_assessment.observed.detect_traffic_disturbance", return_value=finding):
+            result = assess_observed_data(self.root, route)
+        traffic = next(item for item in result["manufacturing_priority_score"]["components"] if item["name"] == "traffic")
+        self.assertIsNone(traffic["contributed_points"])
+        self.assertEqual(result["manufacturing_priority_score"]["maximum"], 100)
+
+    def test_known_maximum_still_saturates_despite_missing_selected_count(self):
+        self.save()
+        route = replace(self.event_route(), traffic_counters=(TrafficCounterMatch("site", "North", 1),))
+        result = assess_observed_data(self.root, route)
+        traffic = next(item for item in result["manufacturing_priority_score"]["components"] if item["name"] == "traffic")
+        self.assertEqual(traffic["contributed_points"], 10)
 
 
 if __name__ == "__main__":

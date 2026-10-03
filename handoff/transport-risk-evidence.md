@@ -1,7 +1,7 @@
 # Transport risk evidence
 
 ## State
-Status: done. Implementation and checks complete; Git checkpoint/share in progress on `feat/transport-risk-evidence`, based on the existing `feat/local-risk-assessment` implementation at 1213e0f (not yet main).
+Status: done. Implementation and review complete; feature-branch integration in progress on `feat/transport-risk-evidence`, based on the existing `feat/local-risk-assessment` implementation at 1213e0f (not yet main).
 
 ## Done
 - Added optional verified detector/class/reference-speed and event/version/effect contracts.
@@ -20,3 +20,10 @@ No shipment routes or normal speeds are invented. Operator assertions must ident
 
 ## Resume
 Read this handoff and `docs/risk-assessment.md` (OpenTransportData section), inspect the working diff, complete checks and checkpoint the transport evidence integration. Preserve existing risk/collector work.
+
+## Review before feature-branch integration
+
+- Checked route matching, vehicle classes, measurement freshness, event version/validity/revocation, maximum fusion and preserved thermal quality holds.
+- Fixed cross-feed coverage: an available count baseline or road signal no longer hides missing explicitly selected evidence. Known severity 100 still saturates the bounded maximum.
+- Added three regression cases for missing selected sources and saturation.
+- Integrate into feat/local-risk-assessment while retaining its standalone traffic Supabase writer and applied migration; main remains unchanged.

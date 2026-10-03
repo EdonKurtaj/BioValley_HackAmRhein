@@ -103,6 +103,14 @@ def assess_observed_data(
     road = assess_road_traffic(data_dir, route)
     known_traffic = [value for value in (traffic_severity, road.severity) if value is not None]
     traffic_severity = max(known_traffic) if known_traffic else None
+    selected_traffic_missing = (
+        (bool(route.traffic_counters) and traffic_finding.robust_z is None)
+        or (bool(route.road_counters or route.road_events) and road.severity is None)
+    )
+    # Maximum fusion needs all selected inputs, except when a known signal
+    # already reaches the maximum and missing evidence cannot increase it.
+    if selected_traffic_missing and traffic_severity != 100:
+        traffic_severity = None
 
     rhine = context.get("rhine") or {}
     port = rhine.get("port_basel_rheinhalle") or {}
@@ -221,6 +229,8 @@ def assess_observed_data(
 
     considered_data.extend(road.evidence)
     omitted_data.extend(road.omitted)
+    if selected_traffic_missing and traffic_severity is None:
+        omitted_data.append("Combined traffic score remains unknown: an explicitly selected traffic source is unavailable.")
     if road.evidence and road.severity is None:
         omitted_data.append("OpenTransportData score omitted: some selected road evidence is unavailable.")
 
