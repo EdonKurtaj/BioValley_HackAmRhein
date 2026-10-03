@@ -92,7 +92,8 @@ class PriorityScoreTests(unittest.TestCase):
         score = calculate_priority_score(thermal, RouteEvidence())
         self.assertEqual(score.minimum, 20)
         self.assertEqual(score.maximum, 80)
-        self.assertEqual(score.coverage_percent, 40)
+        self.assertAlmostEqual(score.coverage_percent, 100 / 3)
+        self.assertEqual(score.score_weight_coverage_percent, 50)
         self.assertIsNone(score.components["route"])
         self.assertIsNone(score.components["urgency"])
 
@@ -158,7 +159,8 @@ class ObservedDataScoreTests(unittest.TestCase):
 
         score = result["manufacturing_priority_score"]
         self.assertEqual(score["score"], 0)
-        self.assertEqual(score["coverage_percent"], 20)
+        self.assertEqual(score["coverage_percent"], 25)
+        self.assertEqual(score["score_weight_coverage_percent"], 40)
         self.assertEqual([item["contributed_points"] for item in score["components"]], [0, None, None, None])
         self.assertIn("no package-temperature curve", result["mode"])
 

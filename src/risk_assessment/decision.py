@@ -79,7 +79,8 @@ def suggest_system_action(
                                     "protect production slack and monitor the shipment.")
             elif priority.coverage_percent < SYSTEM_NORMAL_MIN_COVERAGE:
                 logistics_suggestion = "Monitor"
-                logistics_reason = (f"Only {priority.coverage_percent:.0f}% of score weight has evidence; "
+                logistics_reason = (f"Only {priority.evidence_coverage_available} of "
+                                    f"{priority.evidence_coverage_total} input groups have evidence; "
                                     "collect shipment temperature and ETA data before calling it normal.")
             else:
                 logistics_suggestion = "Normal"

@@ -38,6 +38,32 @@ def _rhine_severity(level_cm: float | None, segment: str | None, status: str) ->
     return round(25.0 + 75.0 * (level_cm - 700.0) / (restriction - 700.0), 1)
 
 
+def _format_age(age_minutes: float | None) -> str:
+    if age_minutes is None:
+        return "age unknown"
+    if age_minutes >= 60:
+        return f"{age_minutes / 60:.1f} h old"
+    return f"{age_minutes:.1f} min old"
+
+
+def _format_value(value: object) -> str:
+    return f"{value:g}" if isinstance(value, (int, float)) else str(value)
+
+
+def _weather_context_values(measurements: dict) -> list[str]:
+    labels = {
+        "gre000z0": ("global radiation", "W/m²"),
+        "sre000z0": ("sunshine duration", "min"),
+        "fu3010z0": ("mean wind", "km/h"),
+        "dkl010z0": ("wind direction", "°"),
+        "ure200s0": ("relative humidity", "%"),
+        "tde200s0": ("dew point", "°C"),
+        "prestas0": ("pressure", "hPa"),
+    }
+    return [f"{name} {measurements[key]} {unit}" for key, (name, unit) in labels.items()
+            if measurements.get(key) is not None]
+
+
 def assess_observed_data(
     data_dir: Path = DEFAULT_DATA_DIR,
     route: RouteEvidence | None = None,
@@ -108,7 +134,9 @@ def assess_observed_data(
                                  ["ETA and material need-by inputs are caller-supplied, not in the open-data feeds."]))
 
     known = [item for item in components if item["contributed_points"] is not None]
-    coverage = sum(item["weight_points"] for item in known)
+    score_weight_coverage = sum(item["weight_points"] for item in known)
+    evidence_coverage = len(known) / len(components) * 100
+    coverage = evidence_coverage
     score = round(sum(item["contributed_points"] for item in known), 1) if known else None
     route_trigger = rhine_status.status in ("pre_alert", "restricted") or traffic_finding.status == "detected"
 
@@ -121,9 +149,9 @@ def assess_observed_data(
     elif (urgency_score is not None and urgency_score >= 50) or route_trigger or (score is not None and score >= 20):
         suggestion = "Buffer"
         suggestion_reason = "Combined evidence indicates elevated risk; protect production slack and monitor the shipment."
-    elif coverage < 50:
+    elif evidence_coverage < 50:
         suggestion = "Monitor"
-        suggestion_reason = (f"Only {coverage:.0f}% of score weight has evidence; collect package-temperature "
+        suggestion_reason = (f"Only {len(known)} of {len(components)} evidence groups have usable inputs; collect package-temperature "
                             "and ETA data before calling it normal.")
     else:
         suggestion = "Normal"
@@ -153,6 +181,85 @@ def assess_observed_data(
         except ValueError:
             return float("-inf")
     newest_traffic = max(traffic_rows, key=record_time) if traffic_rows else None
+    traffic_context = context.get("traffic") or {}
+    considered_data = []
+    omitted_data = []
+    if components[0]["contributed_points"] is not None:
+        used_weather = weather_signal["measurements"]
+        considered_data.append(
+            "Basel/Binningen weather used by score: "
+            f"air temperature {used_weather['temperature_c']} °C, "
+            f"rain {used_weather['precipitation_mm_10min']} mm/10 min, "
+            f"wind gust {used_weather['gust_kmh']} km/h "
+            f"({_format_age(weather.get('observation_age_minutes'))})."
+        )
+        present_context = _weather_context_values(weather.get("measurements") or {})
+        omitted_data.append(
+            "Weather context only (not scored without an exposed handling window): "
+            + (", ".join(present_context) if present_context else "no additional values available")
+            + "."
+        )
+    else:
+        last_weather = weather_signal["measurements"]
+        weather_values = (
+            f"air temperature {last_weather['temperature_c']} °C, "
+            f"rain {last_weather['precipitation_mm_10min']} mm/10 min, "
+            f"wind gust {last_weather['gust_kmh']} km/h"
+        )
+        omitted_data.append(
+            "Weather score omitted: last readings were "
+            f"{weather_values} ({_format_age(weather.get('observation_age_minutes'))}); "
+            f"the feed is {weather.get('source_status', 'unknown')} or a required value is missing."
+        )
+        present_context = _weather_context_values(weather.get("measurements") or {})
+        if present_context:
+            omitted_data.append("Additional weather fields shown as context only, not scored: "
+                                + ", ".join(present_context) + ".")
+
+    if traffic_severity is not None:
+        considered_data.append(
+            "Traffic anomaly: fresh count and same-counter baseline were scored "
+            f"({traffic_context.get('latest_record_age_minutes', 'unknown')} min old)."
+        )
+    else:
+        omitted_data.append(
+            "Traffic: "
+            + (traffic_finding.summary.rstrip(".") + "." if traffic_finding.summary else "no usable traffic evidence.")
+            + (" A comparable baseline is also unavailable." if not traffic_context.get("baseline_available") else "")
+        )
+
+    if rhine_status.status != "unknown":
+        considered_data.append(
+            f"Port of Switzerland gauge: {level} cm, scored for ship leg {route_segment} "
+            f"({_format_age(rhine.get('port_snapshot_age_minutes'))})."
+        )
+    else:
+        rhine_gauge_note = (
+            f"Port gauge reading {level} cm is fresh but excluded because no matching ship leg was supplied."
+            if level is not None and port_is_fresh and route_segment is None
+            else rhine_status.reason
+        )
+        omitted_data.append(f"Rhine route effect: {rhine_gauge_note}")
+    basel_stadt_reading = rhine.get("basel_stadt_latest")
+    if basel_stadt_reading:
+        omitted_data.append(
+            f"Basel-Stadt gauge ({basel_stadt_reading.get('pegelhoehe', 'unknown')} cm) and discharge "
+            f"({basel_stadt_reading.get('abfluss', 'unknown')} m³/s) are context only; this score uses "
+            "the Port gauge for a matched ship leg."
+        )
+
+    if urgency_score is not None:
+        considered_data.append("Production urgency: supplied ETA and material need-by time were scored.")
+    else:
+        omitted_data.append("Production urgency: omitted because estimated arrival and material need-by times were not both supplied.")
+    omitted_data.append("Package temperature: no shipment sensor history is available in observed-data mode.")
+
+    evidence_groups = {
+        "available": len(known),
+        "total": len(components),
+        "percent": round(evidence_coverage, 1),
+        "groups": [item["name"] for item in components],
+    }
     return {
         "mode": "observed data only; no package-temperature curve, route disruption, or ETA is simulated",
         "pipeline": ["Open data", "Disturbance detection", "Risk assessment", "Manufacturing decision", "Factory dashboard"],
@@ -161,13 +268,16 @@ def assess_observed_data(
         "manufacturing_priority_score": {
             "score": score,
             "coverage_percent": round(coverage, 1),
+            "evidence_coverage": evidence_groups,
+            "score_weight_coverage_percent": round(score_weight_coverage, 1),
             "components": components,
-            "interpretation": "Score points sum only current, applicable evidence. Missing/stale inputs are excluded, not treated as zero; coverage shows how much of the 100-point model is scored.",
+            "interpretation": "Evidence coverage counts usable input groups out of four, independent of their score weights. Score-weight coverage separately reports the total weight represented by those groups. Missing/stale inputs are excluded, not treated as zero.",
         },
+        "data_review": {"considered": considered_data, "omitted": omitted_data},
         "current_observations": {
             "weather": weather,
             "weather_score_details": weather_signal,
-            "traffic": {**context.get("traffic", {}), "latest_observation": newest_traffic,
+                        "traffic": {**traffic_context, "latest_observation": newest_traffic,
                         "finding": current_traffic},
             "rhine": {**rhine, "shipment_segment": route_segment,
                       "finding": rhine_status.__dict__},
@@ -190,13 +300,13 @@ def render_observed_summary(result: dict) -> str:
     score = result["manufacturing_priority_score"]
     current_score = f"{score['score']:.1f}" if score["score"] is not None else "unknown"
     components = {item["name"]: item for item in score["components"]}
-    if score["coverage_percent"] == 0:
+    if score["evidence_coverage"]["available"] == 0:
         refresh_note = "Refresh saved feeds with: python3 pythontest/api_requester.py --once"
     else:
         refresh_note = ""
     lines = [
         "CURRENT OPEN-DATA ASSESSMENT — no simulation",
-        f"Weather: {weather.get('source_status', 'unknown')} ({weather.get('observation_age_minutes', 'unknown')} min old); "
+        f"Weather: {weather.get('source_status', 'unknown')} ({_format_age(weather.get('observation_age_minutes'))}); "
         f"{measurements.get('tre200s0', 'unknown')} °C, "
         f"{measurements.get('rre150z0', 'unknown')} mm/10 min rain, gust {measurements.get('fu3010z1', 'unknown')} km/h; "
         f"last-observation context severity {observations['weather_score_details']['last_observation_severity'] if observations['weather_score_details']['last_observation_severity'] is not None else 'unknown'}/100; "
@@ -205,22 +315,29 @@ def render_observed_summary(result: dict) -> str:
         f"Traffic: {traffic.get('source_status', 'unknown')}; newest count "
         f"{traffic_row.get('total', 'unknown')} at {traffic_row.get('sitename', 'unknown')} "
         f"(pw {traffic_row.get('pw', 'unknown')}, delivery vans {traffic_row.get('lief', 'unknown')}, heavy vehicles {traffic_row.get('lw', 'unknown')}) is "
-        f"{traffic.get('latest_record_age_minutes', 'unknown')} minutes old; "
+        f"{_format_age(traffic.get('latest_record_age_minutes'))}; "
         f"baseline available: {traffic.get('baseline_available', False)}; {'excluded' if components['traffic']['contributed_points'] is None else 'scored'}.",
         f"Weather context-only fields: radiation {weather_measurements.get('gre000z0', 'unknown')} W/m², "
         f"sunshine {weather_measurements.get('sre000z0', 'unknown')} min, humidity {weather_measurements.get('ure200s0', 'unknown')}%, "
         f"dew point {weather_measurements.get('tde200s0', 'unknown')} °C, mean wind {weather_measurements.get('fu3010z0', 'unknown')} km/h, "
-        f"pressure {weather_measurements.get('prestas0', 'unknown')} hPa; not scored without a supported relationship/exposed transfer.",
+        f"direction {weather_measurements.get('dkl010z0', 'unknown')}°, pressure {weather_measurements.get('prestas0', 'unknown')} hPa; "
+        "not scored without a supported relationship/exposed transfer.",
         f"Rhine: Port gauge {port.get('value', 'unknown')} cm ({rhine.get('source_status', 'unknown')}, "
-        f"snapshot {rhine.get('port_snapshot_age_minutes', 'unknown')} min old); "
-        f"Basel-Stadt gauge {basel_gauge.get('pegelhoehe', 'unknown')} cm ({rhine.get('basel_stadt_observation_age_minutes', 'unknown')} min old) "
+        f"snapshot {_format_age(rhine.get('port_snapshot_age_minutes'))}); "
+        f"Basel-Stadt gauge {basel_gauge.get('pegelhoehe', 'unknown')} cm ({_format_age(rhine.get('basel_stadt_observation_age_minutes'))}) "
         f"and discharge {basel_gauge.get('abfluss', 'unknown')} m³/s; "
         f"ship leg {'supplied' if rhine.get('shipment_segment') else 'not supplied'}, so route effect {'scored' if components['rhine']['contributed_points'] is not None else 'excluded'}.",
         f"Production urgency: {components['production_urgency']['status']}.",
         f"Decision: {result['action']['recommendation'].replace('_', ' ').title()} — {result['action']['reason']}",
-        f"Current Risk Score: {current_score}/100 (coverage {score['coverage_percent']:.0f}%)",
+        f"Current Risk Score: {current_score}/100",
+        f"Evidence coverage: {score['evidence_coverage']['available']}/{score['evidence_coverage']['total']} input groups ({score['coverage_percent']:.0f}%). "
+        f"Score-weight coverage: {score['score_weight_coverage_percent']:.0f}/100 points.",
         f"System Suggestion: {result['system_suggestion']['suggestion']} — {result['system_suggestion']['reason']}",
-        "A score with low coverage is only the risk contribution from known observations, not a complete shipment-risk estimate.",
+        "DATA REVIEW — considered in calculation",
+        *[f"- {item}" for item in result["data_review"]["considered"]],
+        "DATA REVIEW — omitted or context only",
+        *[f"- {item}" for item in result["data_review"]["omitted"]],
+        "A score with low evidence coverage reflects only the known observations, not a complete shipment-risk estimate.",
     ]
     if refresh_note:
         lines.append(refresh_note)

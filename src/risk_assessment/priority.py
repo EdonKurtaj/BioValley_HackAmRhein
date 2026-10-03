@@ -24,6 +24,9 @@ class PriorityScore:
     minimum: float
     maximum: float
     coverage_percent: float
+    evidence_coverage_available: int
+    evidence_coverage_total: int
+    score_weight_coverage_percent: float
     components: dict[str, float | None]
     weighted_points: dict[str, float | None]
     interpretation: str
@@ -88,16 +91,22 @@ def calculate_priority_score(
     known_points = sum(value for value in weighted.values() if value is not None)
     known_weight = sum(weights[name] for name, value in components.items() if value is not None)
     missing_weight = 1.0 - known_weight
+    known_components = sum(value is not None for value in components.values())
     return PriorityScore(
         minimum=round(known_points, 1),
         maximum=round(min(100.0, known_points + missing_weight * 100), 1),
-        coverage_percent=round(known_weight * 100, 1),
+        coverage_percent=round(known_components / len(components) * 100, 1),
+        evidence_coverage_available=known_components,
+        evidence_coverage_total=len(components),
+        score_weight_coverage_percent=round(known_weight * 100, 1),
         components={name: round(value, 1) if value is not None else None
                     for name, value in components.items()},
         weighted_points={name: round(value, 1) if value is not None else None
                          for name, value in weighted.items()},
         interpretation=(
             "Prototype manufacturing-priority index (0–100), not a probability of damage. "
-            "Unknown inputs widen the score interval; traffic volume is not a delay estimate."
+            "Evidence coverage counts available thermal, route, and urgency input groups. "
+            "Score-weight coverage is reported separately. Unknown inputs widen the score interval; "
+            "traffic volume is not a delay estimate."
         ),
     )

@@ -242,20 +242,21 @@ def run_demo_suite(args: argparse.Namespace, results: dict | None = None) -> str
         "",
         "CURRENT OBSERVED-DATA SCORE (no simulated inputs)",
         f"Current Risk Score: {observed_score['score'] if observed_score['score'] is not None else 'unknown'}/100 "
-        f"(coverage {observed_score['coverage_percent']:.0f}%)",
+        f"(evidence coverage {observed_score['evidence_coverage']['available']}/{observed_score['evidence_coverage']['total']} groups; "
+        f"weight coverage {observed_score['score_weight_coverage_percent']:.0f}/100)",
         f"System Suggestion: {results['current_observed_assessment']['system_suggestion']['suggestion']} — "
         f"{results['current_observed_assessment']['system_suggestion']['reason']}",
         "",
         "DECISION SCENARIOS (package readings and route/ETA cases are simulations)",
-        "| Case | Result | System suggestion | Priority score | Coverage | Route/ETA evidence |",
-        "|---|---|---|---:|---:|---|",
+        "| Case | Result | System suggestion | Priority score | Evidence coverage | Weight coverage | Route/ETA evidence |",
+        "|---|---|---|---:|---:|---:|---|",
     ])
     for label, outcome in outcomes:
         assessment = outcome["assessment"]
         priority = outcome["manufacturing_priority_score"]
         score = f"{priority['minimum']:.1f}" if priority["minimum"] == priority["maximum"] else f"{priority['minimum']:.1f}–{priority['maximum']:.1f}"
         evidence = "; ".join(assessment["logistics_evidence"]) or "No route trigger"
-        lines.append(f"| {label} | **{assessment['action'].replace('_', ' ').title()}** | **{outcome['system_suggestion']['suggestion']}** | {score} | {priority['coverage_percent']:.0f}% | {evidence} |")
+        lines.append(f"| {label} | **{assessment['action'].replace('_', ' ').title()}** | **{outcome['system_suggestion']['suggestion']}** | {score} | {priority['evidence_coverage_available']}/{priority['evidence_coverage_total']} ({priority['coverage_percent']:.0f}%) | {priority['score_weight_coverage_percent']:.0f}% | {evidence} |")
     combined = next(item for item in results["scenarios"] if item["scenario"] == "combined")
     combined_score = combined["manufacturing_priority_score"]
     combined_score_value = (f"{combined_score['minimum']:.1f}"
@@ -289,7 +290,9 @@ def render_scenario_summary(result: dict) -> str:
         f"Package temperature: {package['final_temperature_c']:.1f} °C after {inputs['duration_minutes']:.0f} min"
         if package["final_temperature_c"] is not None else "Package temperature: unavailable in this scenario",
         f"Decision: {assessment['action'].replace('_', ' ').title()} — {assessment['reason']}",
-        f"Current Risk Score: {score_text}/100 (coverage {score['coverage_percent']:.0f}%)",
+        f"Current Risk Score: {score_text}/100",
+        f"Evidence coverage: {score['evidence_coverage_available']}/{score['evidence_coverage_total']} input groups ({score['coverage_percent']:.0f}%). "
+        f"Score-weight coverage: {score['score_weight_coverage_percent']:.0f}/100 points.",
         f"System Suggestion: {result['system_suggestion']['suggestion']} — {result['system_suggestion']['reason']}",
         score["interpretation"],
     ]
