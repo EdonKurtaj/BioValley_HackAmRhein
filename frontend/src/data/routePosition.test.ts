@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { routePosition, routeProgress } from "./routePosition";
+import {
+  routePosition,
+  routeProgress,
+  routeAnimationStart,
+} from "./routePosition";
 
 describe("truck route replay", () => {
   const route: [number, number][] = [
@@ -48,5 +52,37 @@ describe("truck route replay", () => {
     const point = routePosition(corner, 0.5);
     expect(point[0]).toBeCloseTo(7.51, 8);
     expect(point[1]).toBeGreaterThan(47.5);
+  });
+  it("preserves progress when a road passes the same coordinate twice", () => {
+    const loop: [number, number][] = [route[0], route[1], route[0], route[2]];
+    expect(
+      routeAnimationStart(
+        loop,
+        0.8,
+        loop.map((point) => [...point]),
+        0.9,
+      ),
+    ).toBe(0.8);
+    expect(routeAnimationStart(loop, 1, loop, 1)).toBe(1);
+  });
+  it("resets directly when restarting instead of driving backwards", () => {
+    expect(routeAnimationStart(route, 0.8, route, 0.1)).toBe(0.1);
+  });
+  it("keeps the animation position when switching to a connected road", () => {
+    const alternative: [number, number][] = [
+      route[0],
+      route[1],
+      [7.51, 47.54],
+      route[2],
+    ];
+    const start = routeAnimationStart(route, 0.1, alternative, 0.2);
+    expect(routePosition(alternative, start)[0]).toBeCloseTo(
+      routePosition(route, 0.1)[0],
+      9,
+    );
+    expect(routePosition(alternative, start)[1]).toBeCloseTo(
+      routePosition(route, 0.1)[1],
+      9,
+    );
   });
 });

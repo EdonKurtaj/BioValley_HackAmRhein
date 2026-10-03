@@ -11,6 +11,9 @@ import type { Shipment } from "../interfaces";
  */
 export class ShipmentDirections extends MapLibreGlDirections {
   constructor(map: Map) {
+    const outline = getComputedStyle(document.documentElement)
+      .getPropertyValue("--marker-outline")
+      .trim();
     const layers = layersFactory().map((layer) => {
       if (layer.type !== "line" || !layer.id.includes("routeline"))
         return layer;
@@ -24,7 +27,7 @@ export class ShipmentDirections extends MapLibreGlDirections {
           "line-cap": "round" as const,
         },
         paint: {
-          "line-color": casing ? "#ffffff" : ["get", "color"],
+          "line-color": casing ? outline : ["get", "color"],
           "line-width": casing ? 8 : ["case", ["get", "selected"], 6, 3],
           "line-opacity": casing
             ? 0.5

@@ -10,6 +10,27 @@ function distance(a: Coordinates, b: Coordinates) {
   return 2 * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
+/** Preserve travelled progress on loops; only project when the road path changes. */
+export function routeAnimationStart(
+  previousRoute: Coordinates[],
+  previousProgress: number,
+  nextRoute: Coordinates[],
+  nextProgress: number,
+): number {
+  const sameRoute =
+    previousRoute.length === nextRoute.length &&
+    previousRoute.every(
+      (point, index) =>
+        point[0] === nextRoute[index][0] && point[1] === nextRoute[index][1],
+    );
+  if (sameRoute)
+    return nextProgress < previousProgress ? nextProgress : previousProgress;
+  return routeProgress(
+    nextRoute,
+    routePosition(previousRoute, previousProgress),
+  );
+}
+
 /** Locate a marker on a replacement route's shared prefix for continuous rerouting. */
 export function routeProgress(
   route: Coordinates[],

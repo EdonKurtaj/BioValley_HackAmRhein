@@ -56,12 +56,15 @@ complete provider paths preserves their direction/turn validity and avoids telep
     candidates = road_candidates(plan.id)
     primary = candidates[0]["coordinates"]
     total = route_distance_km(primary)
+    if total <= 0 or not 0 <= plan.jam_fraction < 1:
+        return None
     travelled = 0.0
     index = 0
-    for index in range(1, len(primary) - 1):
-        travelled += route_distance_km(primary[index - 1:index + 1])
-        if travelled >= total * plan.jam_fraction:
-            break
+    if plan.jam_fraction > 0:
+        for index in range(1, len(primary) - 1):
+            travelled += route_distance_km(primary[index - 1:index + 1])
+            if travelled + total * 1e-12 >= total * plan.jam_fraction:
+                break
     prefix = primary[:index + 1]
     compatible = [route for route in candidates[1:] if route["coordinates"][:index + 1] == prefix]
     if not compatible:
@@ -77,9 +80,12 @@ complete provider paths preserves their direction/turn validity and avoids telep
     if not available:
         return None
     chosen = available[0]
-    remaining_minutes = plan.travel_minutes * (1 - travelled / total)
-    # Keep the authored replay schedule, scaling it by cached road travel-time cost.
-    remaining_minutes *= chosen["duration_s"] / candidates[0]["duration_s"]
+    # Scale provider costs to the authored replay schedule, then subtract time
+    # already spent on the identical prefix. Only the remaining path changes.
+    remaining_minutes = plan.travel_minutes * (
+        chosen["duration_s"] / candidates[0]["duration_s"] - travelled / total)
+    if remaining_minutes <= 0:
+        return None
     return {"coordinates": chosen["coordinates"], "progress": travelled / total,
             "remaining_minutes": remaining_minutes, "prefix_km": travelled,
             "blocked_location": primary[divergence], "candidate_count": len(candidates)}

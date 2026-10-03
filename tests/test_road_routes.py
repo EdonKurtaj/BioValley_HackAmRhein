@@ -97,9 +97,45 @@ class RoadRoutesTests(unittest.TestCase):
         self.assertFalse(shipment["routing"]["rerouted"])
         self.assertNotEqual(shipment["action"], "reroute")
         held = _shipment(replace(plan, start_c=7, ambient_c=40), self.anchor, 10, allow_reroute=True)
+        self.assertEqual(shipment["alternativeRoute"], ())
         self.assertEqual(held["action"], "quality_review")
         self.assertFalse(held["routing"]["rerouted"])
         self.assertEqual(held["route"], plan.coordinates)
+        self.assertEqual(held["alternativeRoute"], ())
+        self.assertIsNone(held["alternateEtaAt"])
+
+    def test_temperature_hold_after_rerouting_stops_on_the_active_alternative(self):
+        plan = replace(_plans("reroute")[0], start_c=5, ambient_c=12)
+        moving = _shipment(plan, self.anchor, 10, allow_reroute=True)
+        held = _shipment(plan, self.anchor, 25, allow_reroute=True)
+        later = _shipment(plan, self.anchor, 60, allow_reroute=True)
+        self.assertTrue(moving["routing"]["rerouted"])
+        self.assertEqual(moving["status"], "moving")
+        self.assertEqual(held["status"], "held")
+        self.assertTrue(held["routing"]["rerouted"])
+        self.assertEqual(held["route"], moving["route"])
+        self.assertEqual(position(held), position(later))
+        self.assertGreater(held["progress"], moving["progress"])
+        self.assertGreater(later["temperatureC"], held["temperatureC"])
+        self.assertIsNone(held["alternateEtaAt"])
+
+    def test_package_already_outside_temperature_band_never_starts_a_reroute(self):
+        plan = replace(_plans("reroute")[0], start_c=10, ambient_c=10)
+        held = _shipment(plan, self.anchor, 10, allow_reroute=True)
+        self.assertEqual(held["status"], "held")
+        self.assertFalse(held["routing"]["rerouted"])
+        self.assertEqual(held["route"], plan.coordinates)
+        self.assertEqual(held["progress"], 0)
+        self.assertEqual(held["alternativeRoute"], ())
+
+    def test_remaining_cost_subtracts_the_already_travelled_shared_prefix(self):
+        plan = _plans("reroute")[0]
+        option = reroute_options(plan)
+        candidates = ROAD_CACHE["shipments"][plan.id]["routes"]
+        chosen = next(candidate for candidate in candidates if candidate["coordinates"] == option["coordinates"])
+        expected_total = plan.travel_minutes * chosen["duration_s"] / candidates[0]["duration_s"]
+        self.assertAlmostEqual(option["remaining_minutes"] + plan.travel_minutes * option["progress"], expected_total)
+        self.assertEqual(option["progress"], reroute_options(replace(plan, jam_fraction=option["progress"]))["progress"])
 
 
 if __name__ == "__main__":

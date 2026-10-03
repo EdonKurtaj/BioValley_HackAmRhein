@@ -33,7 +33,7 @@ function TemperatureChart({ shipment }: { shipment: Shipment }) {
   const points = history
     .map(
       (point) =>
-        `${28 + ((Date.parse(point.at) - start) / duration) * 232},${y(point.value)}`,
+        `${28 + (duration > 0 ? (Date.parse(point.at) - start) / duration : 0) * 232},${y(point.value)}`,
     )
     .join(" ");
   return (
@@ -121,7 +121,8 @@ export function ShipmentDetails({
           <p>{shipment.routing.message}.</p>
           {shipment.routing.rerouted && (
             <p>
-              Grün: aktive Umleitung · blau gestrichelt: ursprüngliche Route.
+              Durchgezogen: aktive Umleitung · blau gestrichelt: ursprüngliche
+              Route.
             </p>
           )}
         </div>

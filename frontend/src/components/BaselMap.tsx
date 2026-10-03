@@ -5,7 +5,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import type { MapLocation, Shipment } from "../interfaces";
 import { BASEL_CENTER, BASEL_ZOOM, categories } from "../config/map";
-import { routePosition, routeProgress } from "../data/routePosition";
+import { routePosition, routeAnimationStart } from "../data/routePosition";
 import { ShipmentDirections } from "../data/ShipmentDirections";
 import { actionLabels } from "../config/dashboard";
 
@@ -33,7 +33,12 @@ export function BaselMap({
   const map = useRef<maplibregl.Map | null>(null);
   const directions = useRef<ShipmentDirections | null>(null);
   const markers = useRef(new Map<string, Marker>());
-  const truckMarkers = useRef(new Map<string, Marker>());
+  const truckMarkers = useRef(
+    new Map<
+      string,
+      { marker: Marker; route: Shipment["route"]; progress: number }
+    >(),
+  );
   const previousSelected = useRef<string | null>(null);
   const [tileError, setTileError] = useState(false);
 
@@ -81,7 +86,7 @@ export function BaselMap({
       observer.disconnect();
       markers.current.forEach((marker) => marker.remove());
       markers.current.clear();
-      truckMarkers.current.forEach((marker) => marker.remove());
+      truckMarkers.current.forEach(({ marker }) => marker.remove());
       truckMarkers.current.clear();
       directions.current?.destroy();
       directions.current = null;
@@ -103,10 +108,14 @@ export function BaselMap({
       const existing = markers.current.get(location.id);
       if (existing) {
         existing.setLngLat([location.longitude, location.latitude]);
-        existing.getElement().setAttribute("aria-label", location.name);
-        const content = document.createElement("strong");
-        content.textContent = location.name;
-        existing.getPopup().setDOMContent(content);
+        if (
+          existing.getElement().getAttribute("aria-label") !== location.name
+        ) {
+          existing.getElement().setAttribute("aria-label", location.name);
+          const content = document.createElement("strong");
+          content.textContent = location.name;
+          existing.getPopup().setDOMContent(content);
+        }
         return;
       }
       const element = document.createElement("button");
@@ -138,15 +147,15 @@ export function BaselMap({
     const animations: number[] = [];
     let disposed = false;
     const ids = new Set(shipments.map((shipment) => shipment.id));
-    truckMarkers.current.forEach((marker, id) => {
+    truckMarkers.current.forEach(({ marker }, id) => {
       if (!ids.has(id)) {
         marker.remove();
         truckMarkers.current.delete(id);
       }
     });
     for (const shipment of shipments) {
-      let marker = truckMarkers.current.get(shipment.id);
-      if (!marker) {
+      let truckState = truckMarkers.current.get(shipment.id);
+      if (!truckState) {
         const element = document.createElement("button");
         element.type = "button";
         const truck = document.createElement("span");
@@ -156,23 +165,32 @@ export function BaselMap({
         label.textContent = shipment.id;
         element.append(truck, label);
         element.addEventListener("click", () => onSelectShipment(shipment.id));
-        marker = new maplibregl.Marker({ element })
+        const marker = new maplibregl.Marker({ element })
           .setLngLat(routePosition(shipment.route, shipment.progress))
           .addTo(instance);
-        truckMarkers.current.set(shipment.id, marker);
+        truckState = {
+          marker,
+          route: shipment.route,
+          progress: shipment.progress,
+        };
+        truckMarkers.current.set(shipment.id, truckState);
       }
-      const position = marker.getLngLat();
-      const from = routeProgress(shipment.route, [position.lng, position.lat]);
+      const state = truckState;
+      const marker = state.marker;
+      const from = routeAnimationStart(
+        state.route,
+        state.progress,
+        shipment.route,
+        shipment.progress,
+      );
+      state.route = shipment.route;
+      state.progress = from;
       const started = performance.now();
       const animate = (now: number) => {
         if (disposed) return;
         const fraction = Math.min(1, (now - started) / 800);
-        marker!.setLngLat(
-          routePosition(
-            shipment.route,
-            from + (shipment.progress - from) * fraction,
-          ),
-        );
+        state.progress = from + (shipment.progress - from) * fraction;
+        marker.setLngLat(routePosition(shipment.route, state.progress));
         if (fraction < 1) animations.push(requestAnimationFrame(animate));
       };
       animations.push(requestAnimationFrame(animate));
@@ -181,7 +199,7 @@ export function BaselMap({
         .getElement()
         .setAttribute(
           "aria-label",
-          `Transport ${shipment.id}: ${actionLabels[shipment.action]}`,
+          `Transport ${shipment.id}: ${shipment.routing?.rerouted ? "Umleitung aktiv · " : ""}${actionLabels[shipment.action]}`,
         );
       marker
         .getElement()
@@ -212,14 +230,20 @@ export function BaselMap({
     };
   }, [shipments, selectedShipmentId, onSelectShipment]);
 
+  const focusedLocation = locations.find(
+    (location) => location.id === selectedId,
+  );
   useEffect(() => {
+    markers.current.forEach((item, id) => {
+      if (id !== selectedId) item.getPopup().remove();
+    });
     const marker = selectedId ? markers.current.get(selectedId) : undefined;
     if (marker) {
       const coordinates = marker.getLngLat();
       map.current?.easeTo({ center: coordinates, duration: 500 });
       if (!marker.getPopup()?.isOpen()) marker.togglePopup();
     } else markers.current.forEach((item) => item.getPopup().remove());
-  }, [selectedId, locations]);
+  }, [selectedId, focusedLocation?.longitude, focusedLocation?.latitude]);
 
   useEffect(() => {
     map.current?.easeTo({ center: BASEL_CENTER, zoom: BASEL_ZOOM });
@@ -269,8 +293,8 @@ export function BaselMap({
           </strong>
           <span>
             {selectedShipment.routing?.rerouted
-              ? "Grün: aktive Umleitung · blau gestrichelt: ursprüngliche Route"
-              : "Abspielen: Wechsel nach 5 Demo-Minuten · blau gestrichelt: Alternative"}
+              ? "Durchgezogen: aktive Umleitung · blau gestrichelt: ursprüngliche Route"
+              : "Wechsel nach 5 Demo-Minuten · blau gestrichelt: Alternative"}
           </span>
           <span>
             Gemeinsame Straßen bleiben gleich; die Abzweigung liegt weiter auf

@@ -49,7 +49,6 @@ def _plans(scenario: str) -> list[ShipmentPlan]:
 
 def _shipment(plan: ShipmentPlan, anchor: datetime, elapsed_minutes: float, *, allow_reroute=False) -> dict:
     departure = anchor - timedelta(minutes=plan.initial_elapsed_minutes)
-    now = anchor + timedelta(minutes=elapsed_minutes)
     journey_minutes = plan.travel_minutes + plan.delay_minutes
     option = reroute_options(plan) if allow_reroute else None
     trigger_elapsed = max(plan.initial_elapsed_minutes + 5, plan.travel_minutes * plan.jam_fraction)
@@ -58,15 +57,20 @@ def _shipment(plan: ShipmentPlan, anchor: datetime, elapsed_minutes: float, *, a
         option = None
         rerouted_arrival = None
     raw_elapsed = plan.initial_elapsed_minutes + elapsed_minutes
-    rerouted = bool(option and raw_elapsed >= trigger_elapsed)
-    if rerouted:
-        journey_minutes = rerouted_arrival
-    active_coordinates = option["coordinates"] if rerouted else plan.coordinates
     accuracy = DEMO_CONFIG["sensor_accuracy_c"]
     crossings = [time_to_temperature_limit(plan.start_c, plan.ambient_c, limit, timedelta(minutes=plan.tau_minutes))
                  for limit in (DEFAULT_MIN_TEMPERATURE_C + accuracy, DEFAULT_MAX_TEMPERATURE_C - accuracy)]
     hold_times = [ceil(value) for value in crossings if value is not None and value <= journey_minutes]
     hold_at = min(hold_times) if hold_times else None
+    if plan.start_c - accuracy < DEFAULT_MIN_TEMPERATURE_C or plan.start_c + accuracy > DEFAULT_MAX_TEMPERATURE_C:
+        hold_at = 0
+    rerouted = bool(option and raw_elapsed >= trigger_elapsed and
+                    (hold_at is None or hold_at > trigger_elapsed))
+    if rerouted:
+        journey_minutes = rerouted_arrival
+        hold_times = [ceil(value) for value in crossings if value is not None and value <= journey_minutes]
+        hold_at = min(hold_times) if hold_times else None
+    active_coordinates = option["coordinates"] if rerouted else plan.coordinates
     elapsed = raw_elapsed if hold_at is not None else min(raw_elapsed, journey_minutes)
     evaluated_at = departure + timedelta(minutes=elapsed)
     jam_start = plan.travel_minutes * plan.jam_fraction
@@ -97,27 +101,31 @@ def _shipment(plan: ShipmentPlan, anchor: datetime, elapsed_minutes: float, *, a
         movement_elapsed = min(elapsed, hold_at if hold_at is not None else 0)
         movement_delay = min(plan.delay_minutes, max(0.0, movement_elapsed - jam_start))
         progress = min(1.0, (movement_elapsed - movement_delay) / plan.travel_minutes)
+        if option and movement_elapsed >= jam_start:
+            progress = option["progress"]
+        if rerouted:
+            distance = route_distance_km(active_coordinates)
+            fraction = min(1.0, max(0.0, (movement_elapsed - trigger_elapsed) / option["remaining_minutes"]))
+            progress = min(1.0, (option["prefix_km"] + (distance - option["prefix_km"]) * fraction) / distance)
         delivered = False
-        rerouted = False
-        active_coordinates = plan.coordinates
-        journey_minutes = plan.travel_minutes + plan.delay_minutes
     eta = departure + timedelta(minutes=journey_minutes)
     needed = departure + timedelta(minutes=plan.need_after_departure_minutes)
     alternate_eta = (departure + timedelta(minutes=rerouted_arrival)
-                     if option and not delivered else None)
+                     if option and not delivered and not thermal.quality_review_required else None)
     disrupted = plan.delay_minutes > 0 and not delivered and not rerouted
     route = RouteEvidence(
         disruption_observed=disrupted, estimated_arrival_at=eta, material_needed_at=needed,
         buffer_hours=DEMO_CONFIG["buffers_hours"][plan.priority], exposed_handling=False,
-        alternate_route_available=bool(option and not rerouted),
-        alternate_route_suitable=bool(option and not rerouted), alternate_arrival_at=alternate_eta,
+        alternate_route_available=bool(alternate_eta and not rerouted),
+        alternate_route_suitable=bool(alternate_eta and not rerouted), alternate_arrival_at=alternate_eta,
         evidence=(f"SIMULATED route delay: {plan.delay_minutes:g} minutes.",
                   "SIMULATED protected transfer, ETA, need-by, GPS and package readings."),
     )
     assessment = decide_action(thermal, route)
     score = calculate_priority_score(thermal, route)
     distance = route_distance_km(active_coordinates)
-    routing_message = ("Qualitätshold · kein Routenwechsel" if thermal.quality_review_required else
+    routing_message = ("Qualitätshold · auf aktiver Umleitung angehalten" if thermal.quality_review_required and rerouted else
+                       "Qualitätshold · kein Routenwechsel" if thermal.quality_review_required else
                        f"Umleitung aktiv · Demo-Sperrung mit ursprünglich {plan.delay_minutes:g} min Verzögerung umfahren" if rerouted else
                        f"Auslöser: Demo-Sperrung mit {plan.delay_minutes:g} min Verzögerung · Alternative früher · Wechsel nach 5 Replay-Minuten" if option else
                        "Keine verbundene Alternative verfügbar" if allow_reroute else
@@ -126,7 +134,7 @@ def _shipment(plan: ShipmentPlan, anchor: datetime, elapsed_minutes: float, *, a
         "id": plan.id, "name": plan.name, "material": plan.material, "priority": plan.priority,
         "origin": plan.origin, "destination": plan.destination, "routeName": plan.route_name,
         "route": active_coordinates,
-        "alternativeRoute": plan.coordinates if rerouted else plan.alternate_coordinates,
+        "alternativeRoute": plan.coordinates if rerouted else option["coordinates"] if alternate_eta else (),
         "routing": {"source": ROAD_CACHE["source"], "cachedAt": ROAD_CACHE["fetched_at"],
                     "rerouted": rerouted, "message": routing_message,
                     "candidateCount": len(road_candidates(plan.id)),

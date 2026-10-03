@@ -19,7 +19,7 @@ export default function App() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [attempt, setAttempt] = useState(0);
-  const [playing, setPlaying] = useState(false);
+  const [playing, setPlaying] = useState(true);
   const [anchor, setAnchor] = useState(() => new Date().toISOString());
   const elapsed = useRef(0);
   const [selectedId, setSelectedId] = useState<string | null>("BV-104");
@@ -82,33 +82,55 @@ export default function App() {
 
   useEffect(() => {
     if (!playing || mode !== "demo" || !snapshot || error) return;
+    let previousTick = performance.now();
     const timer = window.setInterval(() => {
+      const now = performance.now();
       elapsed.current = Math.min(
         snapshot.simulation?.maximumMinutes ?? 180,
-        elapsed.current + (snapshot.simulation?.minutesPerSecond ?? 1),
+        elapsed.current +
+          ((now - previousTick) / 1000) *
+            (snapshot.simulation?.minutesPerSecond ?? 1),
       );
+      previousTick = now;
       if (elapsed.current >= (snapshot.simulation?.maximumMinutes ?? 180))
         setPlaying(false);
     }, DASHBOARD_POLL_MS);
     return () => window.clearInterval(timer);
     // Replay timing uses a ref so requests are serial rather than aborted every second.
-  }, [playing, mode, !!snapshot, error]);
+  }, [
+    playing,
+    mode,
+    !!snapshot,
+    error,
+    snapshot?.simulation?.maximumMinutes,
+    snapshot?.simulation?.minutesPerSecond,
+  ]);
 
   function restart(nextScenario = scenario) {
-    setPlaying(false);
+    setPlaying(true);
     elapsed.current = 0;
     setAnchor(new Date().toISOString());
     setScenario(nextScenario);
     setSelectedId("BV-104");
     setSelectedLocationId(null);
+    setFilter("all");
   }
 
   function switchMode(next: FeedMode) {
     if (next === mode) return;
-    setPlaying(false);
+    setPlaying(next === "demo");
     setSnapshot(null);
     setSelectedLocationId(null);
     setMode(next);
+  }
+
+  function togglePlayback() {
+    if (
+      !playing &&
+      elapsed.current >= (snapshot?.simulation?.maximumMinutes ?? 180)
+    ) {
+      restart();
+    } else setPlaying((current) => !current);
   }
 
   const shipments = snapshot?.shipments ?? [];
@@ -211,7 +233,7 @@ export default function App() {
           scenario={scenario}
           onScenario={restart}
           playing={playing}
-          onPlay={() => setPlaying(!playing)}
+          onPlay={togglePlayback}
           onRestart={() => restart()}
           canPlay={!!snapshot && !error}
         />
