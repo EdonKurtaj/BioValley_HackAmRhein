@@ -117,7 +117,7 @@ def normalize_opentransportdata(result: FetchResult) -> list[Observation]:
         site_id = reading["site_id"]
         site = sites.get(site_id, {})
         for measured in reading["values"]:
-            meaning = measured.get("meaning")
+            meaning = measured.get("meaning") or ""
             if meaning.endswith("_flow_per_hour"):
                 metric, field_name, unit = meaning, "vehicleFlowRate", "vehicles/hour"
             elif meaning.endswith("_average_speed_kmh"):

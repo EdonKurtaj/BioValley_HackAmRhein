@@ -65,8 +65,16 @@ class SupabaseRestClient:
                 return json.loads(content) if content else None
         except HTTPError as exc:
             status = exc.code
+            migration_hint = ""
+            if table == "data_sources" and status == 400:
+                try:
+                    details = json.loads(exc.read())
+                    if details.get("code") == "23514" and "data_sources_source_kind_check" in details.get("message", ""):
+                        migration_hint = "; apply supabase/migrations/20261003190000_allow_opentransportdata_source_kind.sql in the SQL Editor, then retry"
+                except (ValueError, AttributeError, TypeError):
+                    pass
             exc.close()
-            raise SupabaseError(f"Supabase {table}: HTTP {status}") from None
+            raise SupabaseError(f"Supabase {table}: HTTP {status}{migration_hint}") from None
         except (URLError, TimeoutError, OSError):
             raise SupabaseError(f"Supabase {table}: connection unavailable") from None
 

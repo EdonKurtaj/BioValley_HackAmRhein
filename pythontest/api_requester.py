@@ -268,7 +268,7 @@ def check_source(source: dict) -> dict:
     return result
 
 
-def check_opentransportdata(source: dict) -> dict:
+def check_opentransportdata(source: dict, snapshot: dict | None = None) -> dict:
     """Collect and archive the OTD situation and counter feeds as one source."""
     checked_at = now_utc()
     data = None
@@ -276,12 +276,13 @@ def check_opentransportdata(source: dict) -> dict:
     try:
         import opentransportdata
 
-        data = opentransportdata.fetch_all()
+        data = snapshot if snapshot is not None else opentransportdata.fetch_all()
         if data["errors"]:
             error = "; ".join(data["errors"])
         # Preserve the dedicated per-minute counter archive as well as this
         # collector's normal per-source attempt history.
-        opentransportdata.save_snapshot(data)
+        if snapshot is None:
+            opentransportdata.save_snapshot(data)
     except (OSError, RuntimeError, ValueError) as exc:
         error = f"{type(exc).__name__}: {exc}"
 

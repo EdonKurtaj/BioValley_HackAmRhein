@@ -361,9 +361,23 @@ def save_snapshot(result: dict) -> int:
     return history_rows
 
 
-def run_once(refresh_sites: bool = False) -> tuple[int, dict]:
+def run_once(refresh_sites: bool = False, ingestor=None) -> tuple[int, dict]:
+    from api_requester import SOURCES, check_opentransportdata
+
+    if ingestor is not None:
+        try:
+            ingestor.flush()
+        except Exception as exc:
+            print(f"Supabase retry: FAILED — {type(exc).__name__}: {exc}", file=sys.stderr)
     result = fetch_all(refresh_sites)
     history_rows = save_snapshot(result)
+    source = next(source for source in SOURCES if source["kind"] == "opentransportdata")
+    fetch_result = check_opentransportdata(source, snapshot=result)
+    if ingestor is not None:
+        try:
+            ingestor.ingest(source, fetch_result)
+        except Exception as exc:
+            print(f"Supabase traffic: FAILED — {type(exc).__name__}: {exc}; local archives retained", file=sys.stderr)
     output = OUTPUT_DIR / "latest.json"
     print(f"Saved {len(result['traffic_situations'])} Basel-region traffic situations, "
           f"{len(result['traffic_counters']['sites'])} counter sites, and "
@@ -386,17 +400,21 @@ def main() -> int:
     parser.add_argument("--watch", action="store_true", help="repeat collection every minute and archive new counter readings")
     parser.add_argument("--interval-seconds", type=int, default=60, help="watch interval; minimum 60 seconds")
     parser.add_argument("--refresh-sites", action="store_true", help="refresh the cached counter locations now")
+    parser.add_argument("--local-only", action="store_true", help="archive traffic without writing to Supabase")
     args = parser.parse_args()
     if args.interval_seconds < 60:
         parser.error("--interval-seconds must be at least 60 to respect the feed update cadence")
     try:
-        exit_code, _ = run_once(args.refresh_sites)
+        from api_requester import create_ingestor
+
+        ingestor = create_ingestor(args.local_only)
+        exit_code, _ = run_once(args.refresh_sites, ingestor)
         if not args.watch:
             return exit_code
         while True:
             cycle_started = time.monotonic()
             try:
-                run_once()
+                run_once(ingestor=ingestor)
             except (ET.ParseError, OSError, RuntimeError) as exc:
                 print(f"OpenTransportData fetch failed: {exc}", file=sys.stderr)
             time.sleep(max(0.0, args.interval_seconds - (time.monotonic() - cycle_started)))

@@ -42,3 +42,7 @@ The ingestion contracts live in [interfaces.py](../pythontest/interfaces.py), ma
 ## Access
 
 Row-level security is enabled. The existing schema allows public reads of open data and demo factory tables. The separate [factory-access migration](migrations/20261003160000_restrict_factory_client_access.sql) removes client access to materials, lots, shipments and decisions while preserving collector access and public open-data reads. Apply this migration in Supabase before storing confidential factory data. It tolerates absent factory tables and is repeatable. The migration is prepared locally and is not automatically applied by the collector. Keep ingest writes in trusted server-side code using `SUPABASE_SECRET_KEY`; never place it in browser code or commit it.
+
+## Traffic-only collection
+
+`python3 pythontest/opentransportdata.py` and its `--watch` mode write through the same source registration, fetch log, observation normalization and durable outbox as the regular collector. Vehicle flow uses `vehicles/hour`; mean speed uses `km/h`. Their source observation times and measurement indices distinguish the rows. Situation events are retained in `fetch_runs.raw_payload`, not invented as numeric observations. `--local-only` keeps archives without database writes. Failed database uploads stay pending; a later traffic or regular collector run retries them with stable identities. Apply the source-kind migration above when Supabase reports check-constraint error 23514. Merely having the SQL file locally does not apply it to Supabase.
