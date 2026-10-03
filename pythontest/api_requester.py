@@ -336,12 +336,13 @@ def check_meteoswiss_current(source: dict) -> dict:
     elif not result["saved"]:
         status_line = "FAILED — could not save response"
     elif result["request_ok"]:
-        temp = station["measurements"]["tre200s0"]
+        measurements = station["measurements"]
+        available_count = sum(value is not None for value in measurements.values())
+        temp = measurements.get("tre200s0")
         if temp is not None:
             status_line = f"OK — HTTP {status} — {temp} °C at {station['observed_at']} ({station['age_minutes_at_fetch']} min old; Europe/Zurich)"
         else:
-            count = sum(value is not None for value in station["measurements"].values())
-            status_line = f"OK — HTTP {status} — {count} weather values at {station['observed_at']} (temperature unavailable; Europe/Zurich)"
+            status_line = f"OK — HTTP {status} — {available_count} weather values at {station['observed_at']} (temperature unavailable; Europe/Zurich)"
     else:
         status_line = f"FAILED — HTTP {status or 'connection error'} — {error}"
     print(f"{source['name']}: {status_line}", flush=True)
