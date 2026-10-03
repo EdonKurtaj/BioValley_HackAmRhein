@@ -8,6 +8,7 @@ from risk_assessment.decision import decide_action
 from risk_assessment.disturbance import detect_traffic_disturbance
 from risk_assessment.interfaces import ExposureMetrics, RouteEvidence, TemperatureReading
 from risk_assessment.logistics import classify_rhine_high_water, traffic_volume_anomaly
+from risk_assessment.priority import calculate_priority_score
 from risk_assessment.thermal import analyze_temperature_series, simulate_package_temperature, time_to_temperature_limit
 
 
@@ -70,6 +71,49 @@ class DecisionTests(unittest.TestCase):
 
     def test_missing_telemetry_requires_review(self):
         self.assertEqual(decide_action(None, RouteEvidence()).action, "quality_review")
+
+
+class PriorityScoreTests(unittest.TestCase):
+    def test_all_high_signals_add_to_100_points_without_becoming_damage_probability(self):
+        thermal = ExposureMetrics(60, 0, 2, 0, 0.5, 0)
+        now = datetime.now(timezone.utc)
+        route = RouteEvidence(disruption_observed=True, estimated_arrival_at=now,
+                              material_needed_at=now, buffer_hours=4)
+        score = calculate_priority_score(thermal, route)
+        self.assertEqual(score.minimum, 100)
+        self.assertEqual(score.maximum, 100)
+        self.assertEqual(score.coverage_percent, 100)
+        self.assertEqual(score.weighted_points, {"thermal": 40.0, "route": 35.0, "urgency": 25.0})
+        self.assertIn("not a probability", score.interpretation)
+
+    def test_missing_inputs_expand_range_instead_of_counting_as_zero(self):
+        thermal = ExposureMetrics(0, 0, 0, 0, 0.25, 0)
+        score = calculate_priority_score(thermal, RouteEvidence())
+        self.assertEqual(score.minimum, 20)
+        self.assertEqual(score.maximum, 80)
+        self.assertEqual(score.coverage_percent, 40)
+        self.assertIsNone(score.components["route"])
+        self.assertIsNone(score.components["urgency"])
+
+    def test_incomplete_temperature_history_is_unknown_for_scoring(self):
+        thermal = ExposureMetrics(0, 0, 0, 0, 0, 0, incomplete_history=True)
+        score = calculate_priority_score(thermal, RouteEvidence())
+        self.assertEqual(score.minimum, 0)
+        self.assertEqual(score.maximum, 100)
+        self.assertEqual(score.coverage_percent, 0)
+        self.assertIsNone(score.components["thermal"])
+
+    def test_traffic_anomaly_scales_to_watch_threshold(self):
+        route = RouteEvidence(traffic_anomaly=1.5)
+        score = calculate_priority_score(None, route)
+        self.assertEqual(score.components["route"], 50)
+        self.assertEqual(score.minimum, 17.5)
+
+    def test_hot_and_cold_degree_hours_both_add_to_thermal_component(self):
+        thermal = ExposureMetrics(0, 0, 0, 0, 0.25, 0.25)
+        score = calculate_priority_score(thermal, RouteEvidence())
+        self.assertEqual(score.components["thermal"], 100)
+        self.assertEqual(score.weighted_points["thermal"], 40)
 
 
 class LogisticsTests(unittest.TestCase):

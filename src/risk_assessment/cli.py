@@ -14,14 +14,17 @@ from .disturbance import detect_open_data_disturbances
 from .interfaces import RouteEvidence
 from .logistics import TrafficAnomaly, classify_rhine_high_water, traffic_volume_anomaly
 from .local_data import DEFAULT_DATA_DIR, collect_local_context, read_snapshot
+from .priority import calculate_priority_score
 from .thermal import analyze_temperature_series, simulate_package_temperature, time_to_temperature_limit
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scenario", choices=("hot", "cold", "observed-weather", "rain", "traffic", "rhine",
+    parser.add_argument("--scenario", choices=("hot", "cold", "normal", "observed-weather", "combined", "rain", "traffic", "rhine",
                                                 "buffer", "expedite", "reroute", "stale", "all"), default="hot")
     parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
+    parser.add_argument("--output-format", choices=("table", "json"), default="table",
+                        help="Output format for --scenario all; single scenarios always output JSON")
     parser.add_argument("--start-c", type=float, default=7.0)
     parser.add_argument("--ambient-c", type=float, help="Scenario ambient temperature; defaults by scenario")
     parser.add_argument("--duration-minutes", type=float, default=60.0)
@@ -44,7 +47,7 @@ def run(args: argparse.Namespace) -> dict:
     weather_current = weather.get("source_status") == "observed"
     observed_air_c = weather_readings.get("tre200s0") if weather_current else None
     fallback_air_c = observed_air_c if observed_air_c is not None else 20.0
-    defaults = {"hot": 40.0, "cold": -5.0, "observed-weather": fallback_air_c,
+    defaults = {"hot": 40.0, "cold": -5.0, "normal": 5.0, "observed-weather": fallback_air_c, "combined": fallback_air_c,
                 "rain": 5.0, "traffic": 5.0, "rhine": 5.0,
                 "buffer": 5.0, "expedite": 5.0,
                 "reroute": 5.0, "stale": 5.0}
@@ -78,6 +81,16 @@ def run(args: argparse.Namespace) -> dict:
         args.eta_at = args.eta_at or (now + timedelta(hours=5)).isoformat()
         args.needed_at = args.needed_at or (now + timedelta(hours=6)).isoformat()
         route_evidence.append("SIMULATED ETA leaves one hour before the material is needed.")
+    if args.scenario == "combined":
+        disruption = True
+        now = datetime.now(timezone.utc)
+        args.eta_at = args.eta_at or (now + timedelta(hours=5)).isoformat()
+        args.needed_at = args.needed_at or (now + timedelta(hours=6)).isoformat()
+        route_evidence.append("SIMULATED: traffic disruption and one hour of production slack; not inferred from live traffic counts.")
+    if args.scenario in ("normal", "expedite"):
+        disruption = False
+        if args.scenario == "normal":
+            route_evidence.append("SIMULATED baseline case: no route disruption is supplied.")
     if args.scenario == "reroute":
         route_segment = route_segment or "basel_mittlere_bruecke_birsfelden"
         water_level = args.port_water_level_cm if args.port_water_level_cm is not None else 800.0
@@ -112,6 +125,7 @@ def run(args: argparse.Namespace) -> dict:
                           material_needed_at=parse_time(args.needed_at),
                           buffer_hours=args.buffer_hours, evidence=tuple(route_evidence))
     assessment = decide_action(thermal, route)
+    priority = calculate_priority_score(thermal, route)
     upper = time_to_temperature_limit(args.start_c, ambient, 8.0, tau)
     lower = time_to_temperature_limit(args.start_c, ambient, 2.0, tau)
     return {
@@ -135,11 +149,14 @@ def run(args: argparse.Namespace) -> dict:
         "assessment": {"action": assessment.action, "reason": assessment.reason,
                        "thermal_status": assessment.thermal_status, "logistics_status": assessment.logistics_status,
                        "logistics_evidence": list(assessment.logistics_evidence)},
+        "manufacturing_priority_score": priority.as_dict(),
         "traffic_anomaly": traffic_result.__dict__ if traffic_result else None,
         "rhine_status": rhine_status.__dict__ if rhine_status else None,
         "detected_open_data_disturbances": detect_open_data_disturbances(args.data_dir),
         "local_observed_context": context,
         "limitations": ["Scenario package temperatures are simulated, not measured.",
+                        "The priority score is a configurable prototype index, not a calibrated probability or product-quality verdict.",
+                        "The score weights are illustrative; use shipment outcomes and factory review to calibrate them before operational use.",
                         "Saved weather is a regional observation, not a shipment forecast or box reading.",
                         "The saved ten-record traffic sample has no baseline and cannot establish congestion.",
                         "Local Rhine gauge snapshots do not create a route restriction without a matching ship-leg segment.",
@@ -147,29 +164,57 @@ def run(args: argparse.Namespace) -> dict:
     }
 
 
-def run_demo_suite(args: argparse.Namespace) -> str:
-    """Show all four decision paths beside the current local-data assessment."""
+def run_demo_suite_data(args: argparse.Namespace) -> dict:
+    """Return structured scenario results suitable for later dashboard use."""
     now = datetime.now(timezone.utc)
     specifications = [
-        ("Normal", "observed-weather", now + timedelta(hours=2), now + timedelta(hours=8)),
+        ("Normal", "normal", now + timedelta(hours=2), now + timedelta(hours=8)),
         ("Buffer", "buffer", now + timedelta(hours=2), now + timedelta(hours=8)),
         ("Expedite", "expedite", now + timedelta(hours=5), now + timedelta(hours=6)),
         ("Reroute", "reroute", now + timedelta(hours=2), now + timedelta(hours=8)),
+        ("Combined weather + traffic + deadline", "combined", None, None),
     ]
     outcomes = []
     for label, scenario, eta, need_by in specifications:
         case = copy.copy(args)
         case.scenario = scenario
-        case.start_c = 5.0
-        case.ambient_c = 5.0
-        case.duration_minutes = 10.0
-        case.eta_at = eta.isoformat()
-        case.needed_at = need_by.isoformat()
+        case.start_c = 7.0 if scenario == "combined" else 5.0
+        case.ambient_c = None if scenario == "combined" else 5.0
+        case.duration_minutes = 30.0 if scenario == "combined" else 10.0
+        case.eta_at = eta.isoformat() if eta else None
+        case.needed_at = need_by.isoformat() if need_by else None
         outcome = run(case)
         outcomes.append((label, outcome))
 
     context = outcomes[0][1]["local_observed_context"]
     disturbances = outcomes[0][1]["detected_open_data_disturbances"]
+    return {
+        "mode": "local observed context plus explicitly simulated scenario results",
+        "pipeline": ["Open data", "Disturbance detection", "Risk assessment", "Manufacturing decision", "Factory dashboard"],
+        "local_observed_context": context,
+        "detected_open_data_disturbances": disturbances,
+        "scenarios": [
+            {
+                "label": label,
+                "scenario": outcome["scenario"],
+                "scenario_inputs": outcome["scenario_inputs"],
+                "package_temperature": outcome["package_temperature"],
+                "assessment": outcome["assessment"],
+                "manufacturing_priority_score": outcome["manufacturing_priority_score"],
+                "traffic_anomaly": outcome["traffic_anomaly"],
+                "rhine_status": outcome["rhine_status"],
+            }
+            for label, outcome in outcomes
+        ],
+    }
+
+
+def run_demo_suite(args: argparse.Namespace) -> str:
+    """Render all decision paths beside current local data for terminal review."""
+    results = run_demo_suite_data(args)
+    outcomes = [(item["label"], item) for item in results["scenarios"]]
+    context = results["local_observed_context"]
+    disturbances = results["detected_open_data_disturbances"]
     weather = context.get("weather") or {}
     measurements = weather.get("measurements") or {}
     traffic = context.get("traffic") or {}
@@ -188,18 +233,23 @@ def run_demo_suite(args: argparse.Namespace) -> str:
     lines.extend(f"- {item['source']}: {item['status']} — {item['summary']}" for item in disturbances)
     lines.extend([
         "",
-        "DECISION SCENARIOS (package starts and stays at simulated 5 °C)",
-        "| Case | Result | Route/ETA evidence |",
-        "|---|---|---|",
+        "DECISION SCENARIOS (package readings and route/ETA cases are simulations)",
+        "| Case | Result | Priority score | Coverage | Route/ETA evidence |",
+        "|---|---|---:|---:|---|",
     ])
     for label, outcome in outcomes:
         assessment = outcome["assessment"]
+        priority = outcome["manufacturing_priority_score"]
+        score = f"{priority['minimum']:.1f}" if priority["minimum"] == priority["maximum"] else f"{priority['minimum']:.1f}–{priority['maximum']:.1f}"
         evidence = "; ".join(assessment["logistics_evidence"]) or "No route trigger"
-        lines.append(f"| {label} | **{assessment['action'].replace('_', ' ').title()}** | {evidence} |")
+        lines.append(f"| {label} | **{assessment['action'].replace('_', ' ').title()}** | {score} | {priority['coverage_percent']:.0f}% | {evidence} |")
     lines.extend([
         "",
-        "The four decision triggers are simulated so each pathway can be checked without GPS or a map. Current open data stays visible as real context; it does not silently become a simulated truck delay.",
+        "The Normal, Buffer, Expedite, and Reroute cases are simulated so each pathway can be checked without GPS or a map. Current open data stays visible as real context; it does not silently become a simulated truck delay.",
         "Traffic counts can detect unusual volume only when fresh, route-matched counts have enough same-counter/day/hour history. A volume anomaly by itself is not congestion; measured ETA/slack is what drives Expedite.",
+        "Priority score = 40% thermal exposure + 35% route disturbance + 25% production urgency. Component scales are 0–100; combined weighted points add, while missing inputs are shown as a score range rather than counted as zero.",
+        "The combined case uses current outdoor temperature as a simulated ambient exposure, a simulated traffic disruption, and a simulated one-hour production slack. A quality review overrides logistics action if the simulated box temperature leaves 2–8 °C; the score itself never orders quarantine.",
+        "A quality review/hold is triggered by package-temperature evidence and stays separate from the manufacturing priority score.",
         "",
     ])
     return "\n".join(lines)
@@ -209,7 +259,9 @@ def main() -> int:
     args = build_parser().parse_args()
     if args.scenario == "all":
         try:
-            print(run_demo_suite(args))
+            output = (json.dumps(run_demo_suite_data(args), indent=2, ensure_ascii=False)
+                      if args.output_format == "json" else run_demo_suite(args))
+            print(output)
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             raise SystemExit(str(exc)) from exc
         return 0

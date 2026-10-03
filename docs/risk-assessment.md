@@ -20,7 +20,7 @@ The saved requester samples are snapshots, not a representative historical basel
 
 ## Calculation
 
-The local Python engine is in `src/risk_assessment/`. It reads the requester's saved `latest.json` snapshots under `pythontest/data/`; absent, failed, or stale feeds remain unknown/context. It does not write to Supabase. For a first calculation, run `PYTHONPATH=src python3 -m risk_assessment.cli --scenario hot --start-c 7 --duration-minutes 60 --tau-minutes 90` from the repository root, or run `--scenario all` for a four-action dashboard demonstration. The default hot/cold cases and route triggers are deterministic demo assumptions; `--ambient-c` can set a different scenario value. The engine reports action and evidence, not a probability or numeric risk score.
+The local Python engine is in `src/risk_assessment/`. It reads the requester's saved `latest.json` snapshots under `pythontest/data/`; absent, failed, or stale feeds remain unknown/context. It does not write to Supabase. For a first calculation, run `PYTHONPATH=src python3 -m risk_assessment.cli --scenario hot --start-c 7 --duration-minutes 60 --tau-minutes 90` from the repository root. Run `PYTHONPATH=src python3 -m risk_assessment.cli --scenario all` for a five-case terminal dashboard demo, or add `--output-format json` to get structured scenario/component data for later visualization. The `combined` scenario joins the current observed outdoor temperature (when available) to a simulated package response, route disruption, and deadline. The default hot/cold cases and route triggers are deterministic demo assumptions; `--ambient-c` can set a different scenario value. The engine reports a manufacturing priority index alongside the action and evidence; this is not a probability of damage.
 
 ### 1. Package temperature: measured first, modelled only for scenarios
 
@@ -106,7 +106,24 @@ Recommended decision order:
 4. **Buffer:** a disruption is plausible but there is enough slack; keep the material in controlled storage and avoid unnecessary handling.
 5. **Normal:** no relevant route trigger, package reading within range, telemetry current, and sufficient slack.
 
-Display thermal exposure, route status, slack, and chosen action as distinct, explainable fields. Do not use a 0–100 score. A future probabilistic score would require historical shipment outcomes and validation data that are not available now. “Normal” means no modeled intervention trigger; it is not product release or proof of safety.
+Display thermal exposure, route status, slack, and chosen action as distinct, explainable fields. The prototype manufacturing-priority index is 0–100 points and is calculated as:
+
+```text
+thermal_component = clamp((hot_degree_hours + cold_degree_hours) / 0.5 °C·h × 100, 0, 100)
+route_component   = max(explicit route disturbance, route restriction, traffic anomaly component)
+traffic_component = clamp(robust_traffic_z / 3 × 100, 0, 100)
+urgency_component = clamp((buffer_hours - slack_hours) / buffer_hours × 100, 0, 100)
+
+priority_score = 0.40 × thermal_component
+               + 0.35 × route_component
+               + 0.25 × urgency_component
+```
+
+Each component is on a 0–100 scale; the weights allocate up to 40, 35, and 25 score points. Thermal exposure is scaled against a **demo reference of 0.5 °C·h**, traffic volume against the detector's **robust z = 3 watch threshold**, and urgency against the configurable production buffer (4 hours by default). These scales and weights are explicit prototype choices, not empirical product or factory risk parameters. They let multiple signals add to a higher score than any single signal's weighted contribution, as the challenge describes.
+
+The score interval uses incomplete evidence honestly. Known weighted contributions form its lower bound; each missing component can add up to its full weight for the upper bound. For example, with only thermal evidence the displayed result is a range, not a falsely precise score. `coverage_percent` reports how much of the score's total weight has evidence. Do not compare scores with substantially different coverage as if they had equal certainty.
+
+Traffic counts only contribute an anomaly signal when a comparable baseline exists; they are not converted into travel minutes. A traffic count anomaly and route disruption combine by taking the larger route component, avoiding double-counting the same route problem. ETA slack contributes urgency once because it is already a direct schedule consequence. Outdoor weather affects the score only through a clearly labeled package-exposure simulation or a separately supplied scenario signal; it is never treated as measured box temperature. A quality review/hold is still a separate deterministic rule triggered by package-temperature evidence and has no score threshold. The index is not a probability of delay or damage, FMEA-derived RPN, product-quality verdict, or validated operational control. Calibration would require agreed factory criteria and outcome data. “Normal” means no modeled intervention trigger; it is not product release or proof of safety.
 
 ## Current local implementation boundaries
 

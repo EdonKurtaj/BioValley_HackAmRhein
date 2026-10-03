@@ -1,6 +1,6 @@
 # Risk-assessment plan
 
-Goal: use current observed Basel weather, traffic and Rhine data plus clearly labelled simulated shipment telemetry to explain risk to a critical generic 2–8 °C material. Keep thermal exposure separate from route/supply disruption. Product-quality disposition stays with quality review because no product-specific stability limits are provided. The calculation and assumptions are in [risk-assessment.md](risk-assessment.md).
+Goal: use current observed Basel weather, traffic and Rhine data plus clearly labelled simulated shipment telemetry to explain risk to a critical generic 2–8 °C material. Keep thermal exposure separate from route/supply disruption, combine supported signals in an explainable prototype manufacturing-priority index, and keep product-quality disposition with quality review because no product-specific stability limits are provided. The calculation and assumptions are in [risk-assessment.md](risk-assessment.md).
 
 Owners are proposed as @gggnnnttt because no team ownership file is present. Reassign when the team agrees. Do not treat simulated telemetry or demo thresholds as validated operational controls.
 

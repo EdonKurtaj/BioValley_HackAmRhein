@@ -9,7 +9,7 @@ from .interfaces import Assessment, ExposureMetrics, RouteEvidence
 
 
 def decide_action(thermal: ExposureMetrics | None, route: RouteEvidence) -> Assessment:
-    """Apply deterministic precedence; never manufacture a numeric risk score."""
+    """Apply deterministic decision rules; quality review takes precedence."""
     if not isfinite(route.buffer_hours) or route.buffer_hours < 0:
         raise ValueError("buffer hours must be finite and non-negative")
     if route.traffic_anomaly is not None and not isfinite(route.traffic_anomaly):
