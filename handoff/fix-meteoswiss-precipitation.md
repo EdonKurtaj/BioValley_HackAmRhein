@@ -1,17 +1,18 @@
-# MeteoSwiss precipitation parsing
+# MeteoSwiss current-weather parsing
 
 ## State
-Done locally. The parser and offline tests pass; a fresh live CSV fetch was not verified because network approval was declined.
+Done locally. The parser and offline tests pass, and a fresh live Basel/Binningen fetch saved the full station row.
 
 ## Done
-- Read the existing `rre150z0` ten-minute precipitation field from the Basel/Binningen row in the current-observations CSV.
-- Save the value in `measurements` with mm metadata. Preserve missing `-` or blank values as `null`, distinct from zero precipitation.
+- Read and save every current-weather measurement column from the Basel/Binningen row, including temperature, ten-minute precipitation, wind, gusts, radiation and humidity.
+- Preserve missing `-` or blank values as `null`, distinct from zero precipitation. Add labels and units for the fields likely to inform risk assessment.
 - Keep temperature parsing and HTTP 429 handling working. No forecast source was added.
-- Update `docs/SOURCES.md` to describe the fields used.
+- Update `docs/SOURCES.md` and `docs/data-signals.md` to describe the fields and their limits.
 - Verify with offline tests, Python compilation, `doc-check` and `git diff --check`.
+- Run the updated requester against the live CSV: the 3 October 2026 11:20 local observation saved 12 numeric readings from 20 fields, with eight unavailable fields as `null`.
 
 ## Next
-- When a live MeteoSwiss fetch is allowed, run the requester once and inspect the newly saved Basel/Binningen `rre150z0` value. Do not infer a real reading from the old local snapshot.
+- Build risk rules that use the weather fields only as external hazard signals; product-temperature and packaging evidence still need separate inputs.
 - Review and merge this branch separately from `docs/plan`; that plan branch contains the corrected no-forecast scope and is ahead of its remote by two local commits.
 
 ## Files

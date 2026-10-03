@@ -53,8 +53,9 @@ class MeteoswissPrecipitationTests(unittest.TestCase):
         for raw_value, expected in (("0.70", 0.7), ("0.00", 0), ("-", None), ("", None)):
             with self.subTest(raw_value=raw_value):
                 body = (
-                    "Station/Location;Date;tre200s0;rre150z0\n"
-                    f"BAS;202610030810;14.60;{raw_value}\n"
+                    "Station/Location;Date;tre200s0;rre150z0;fu3010z0;fu3010z1;"
+                    "gre000z0;ure200s0;sre000z0;tde200s0;dkl010z0;pp0qffs0;ppz850s0\n"
+                    f"BAS;202610030810;14.60;{raw_value};4.3;11.0;326;67.5;10;6.1;26;1021;-\n"
                 ).encode("cp1252")
                 with (
                     patch.object(
@@ -70,7 +71,14 @@ class MeteoswissPrecipitationTests(unittest.TestCase):
                 measurements = result["data"]["station"]["measurements"]
                 self.assertEqual(measurements["tre200s0"], 14.6)
                 self.assertEqual(measurements["rre150z0"], expected)
+                self.assertEqual(measurements["fu3010z1"], 11)
+                self.assertEqual(measurements["gre000z0"], 326)
+                self.assertEqual(measurements["ure200s0"], 67.5)
+                self.assertEqual(measurements["pp0qffs0"], 1021)
+                self.assertIsNone(measurements["ppz850s0"])
+                self.assertEqual(result["data"]["station"]["measurement_count"], 9 if expected is None else 10)
                 self.assertEqual(result["data"]["parameter_metadata"]["rre150z0"]["unit"], "mm")
+                self.assertEqual(result["data"]["parameter_metadata"]["fu3010z1"]["unit"], "km/h")
                 save_result.assert_called_once_with(source, result, None)
 
 
