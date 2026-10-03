@@ -6,7 +6,7 @@ Every dataset, API, notable library and AI tool used, with licence. Feeds the so
 |---|---|---|---|
 | Codex (OpenAI) | chatgpt.com/codex | Tool, AI-assisted development | Coding assistant |
 | OpenStreetMap | https://www.openstreetmap.org/copyright | ODbL map data; standard tile usage policy at https://operations.osmfoundation.org/policies/tiles/ | Basel basemap, visible attribution; no bulk downloading |
-| Leaflet | https://leafletjs.com | BSD-2-Clause | Interactive map |
+| MapLibre GL JS | https://maplibre.org/maplibre-gl-js/docs/ | BSD-3-Clause | Interactive Basel map |
 | React and Vite | https://react.dev and https://vite.dev | MIT | Standalone frontend and development tools |
 | Illustrative map locations | Authored for this prototype | Project-authored example data | Orientation only; no observed measurements |
 | Basel motor traffic counts (dataset 100006) | https://data.bs.ch/explore/dataset/100006/ | Basel-Stadt Open Government Data terms; CC0-style open reuse | Traffic observations for logistics disruption |
