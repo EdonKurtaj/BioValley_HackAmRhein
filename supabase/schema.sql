@@ -8,7 +8,7 @@ create table if not exists public.data_sources (
     id text primary key,
     name text not null,
     url text not null,
-    source_kind text not null check (source_kind in ('meteo_current', 'json', 'html')),
+    source_kind text not null check (source_kind in ('meteo_current', 'json', 'html', 'opentransportdata')),
     description text,
     enabled boolean not null default true,
     created_at timestamptz not null default now()

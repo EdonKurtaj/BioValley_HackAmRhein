@@ -1,0 +1,37 @@
+# Transport risk evidence
+
+## State
+Status: done. Implementation, review and integration complete; reviewed on `feat/transport-risk-evidence`, based on the existing `feat/local-risk-assessment` implementation at 1213e0f (not yet main).
+
+## Done
+- Added optional verified detector/class/reference-speed and event/version/effect contracts.
+- Connected OpenTransportData to observed scoring and existing action policy without changing weights or thermal quality rules.
+- Added speed-loss calculation, feed freshness/validity checks, revocation/version checks, candidate JSON, and observed missing-evidence score bounds.
+- Kept unknown selected evidence unknown and combined overlapping traffic signals via maximum.
+- Extended collector event metadata; older event snapshots require refresh.
+- Added calculation and integration checks; repaired existing archive test's missing mock for the previously added OTD source.
+- Documented assumptions and CLI usage. No packages or database changes.
+
+## Next
+128 automated checks passed (76 risk/integration and 52 collector), observed CLI and full scenario JSON ran successfully, documentation and whitespace checks passed. No formatter is configured/installed in this standard-library project. Save/share the checkpoint; do not merge without approval.
+
+## Limits
+No shipment routes or normal speeds are invented. Operator assertions must identify the remaining route, direction, vehicle applicability and comparable normal speed. No calibrated delay or damage probability. No ETA inference. Minute counters expire after five minutes; use minute watch mode for fresh evidence. Event effect is explicitly reviewed per source version; recurring validity is excluded.
+
+## Resume
+Read this handoff and `docs/risk-assessment.md` (OpenTransportData section), inspect the working diff, complete checks and checkpoint the transport evidence integration. Preserve existing risk/collector work.
+
+## Review before feature-branch integration
+
+- Checked route matching, vehicle classes, measurement freshness, event version/validity/revocation, maximum fusion and preserved thermal quality holds.
+- Fixed cross-feed coverage: an available count baseline or road signal no longer hides missing explicitly selected evidence. Known severity 100 still saturates the bounded maximum.
+- Added three regression cases for missing selected sources and saturation.
+- Integrate into feat/local-risk-assessment while retaining its standalone traffic Supabase writer and applied migration; main remains unchanged.
+
+## Combined acceptance
+
+- Merged into feat/local-risk-assessment, preserving its standalone traffic Supabase ingestion, outbox retry and migration changes.
+- Removed duplicate archive-test mocks introduced by automatic merging.
+- Added a parser-to-archive integration case proving the same truck measurements become database rows and the route-matched speed-loss score.
+- Final checks: 80 engine/integration tests and 57 collector tests pass; observed and all-scenario CLI output, documentation and whitespace checks pass.
+- No main merge or push performed; the earlier push was declined by the user.
