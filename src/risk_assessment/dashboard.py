@@ -128,7 +128,8 @@ def demo_dashboard(anchor: datetime, elapsed_minutes=0, scenario="fleet") -> dic
     fleet = demo_fleet(anchor, elapsed_minutes, scenario)
     stamp = fleet["updatedAt"]
     air = 40 if scenario == "heat" else 18.4 if scenario == "normal" else 35
-    delays = [shipment for shipment in fleet["shipments"] if shipment["delayMinutes"] > 0 and shipment["status"] != "delivered"]
+    delays = [shipment for shipment in fleet["shipments"] if shipment["delayMinutes"] > 0 and shipment["status"] != "delivered"
+              and not shipment["routing"]["rerouted"]]
     alerts = [{"id": f"jam-{shipment['id']}", "title": f"Stau · {shipment['routeName']}",
                "detail": f"Simulierte Verzögerung {shipment['delayMinutes']:g} min · {shipment['id']}",
                "kind": "traffic", "observedAt": stamp, "freshness": "current"} for shipment in delays]
@@ -136,7 +137,8 @@ def demo_dashboard(anchor: datetime, elapsed_minutes=0, scenario="fleet") -> dic
         alerts.append({"id": "heat", "title": "Hohe Außentemperatur", "detail": "Simuliert · Kühlung und Umschlagfenster prüfen; Paketmessung bleibt separat.",
                        "kind": "weather", "observedAt": stamp, "freshness": "current"})
     locations = [*MAP_LOCATIONS, *[{"id": alert["id"], "name": alert["title"], "category": "traffic",
-                                  "longitude": shipment["route"][3][0], "latitude": shipment["route"][3][1],
+                                  "longitude": (shipment["routing"]["blockedLocation"] or shipment["route"][3])[0],
+                                  "latitude": (shipment["routing"]["blockedLocation"] or shipment["route"][3])[1],
                                   "description": alert["detail"]} for shipment, alert in zip(delays, alerts)]]
     return {"mode": "demo", **fleet, "locations": locations, "alerts": alerts,
             "signals": [
@@ -144,4 +146,4 @@ def demo_dashboard(anchor: datetime, elapsed_minutes=0, scenario="fleet") -> dic
                 _signal("traffic", "Routenstörungen", len(delays), "Stau", stamp, "current", "Demo-Verkehr", "Explizit den Demo-LKW zugeordnet", bool(delays)),
                 _signal("gust", "Windböen", 12, "km/h", stamp, "current", "Demo-Wetter", "Synthetische Messung"),
                 _signal("rhine", "Rheinpegel", 479, "cm", stamp, "current", "Demo-Pegel", "Kontext · kein Einfluss auf Demo-LKW"),
-            ], "sourceLabel": "Synthetische Messungen, GPS, Routen und Paketdaten", "transportSource": "Simulierte LKW-Flotte"}
+            ], "sourceLabel": "OSRM-Straßenrouten · synthetische Messungen, GPS und Paketdaten", "transportSource": "Simulierte LKW-Flotte"}

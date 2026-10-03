@@ -10,6 +10,49 @@ function distance(a: Coordinates, b: Coordinates) {
   return 2 * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
+/** Locate a marker on a replacement route's shared prefix for continuous rerouting. */
+export function routeProgress(
+  route: Coordinates[],
+  point: Coordinates,
+): number {
+  const lengths = route
+    .slice(1)
+    .map((end, index) => distance(route[index], end));
+  const total = lengths.reduce((sum, length) => sum + length, 0);
+  if (!total) return 0;
+  const longitudeScale = Math.cos((point[1] * Math.PI) / 180);
+  let bestDistance = Infinity;
+  let bestProgress = 0;
+  let travelled = 0;
+  for (let index = 0; index < lengths.length; index++) {
+    const start = route[index];
+    const end = route[index + 1];
+    const dx = (end[0] - start[0]) * longitudeScale;
+    const dy = end[1] - start[1];
+    const squared = dx * dx + dy * dy;
+    const fraction = squared
+      ? Math.max(
+          0,
+          Math.min(
+            1,
+            ((point[0] - start[0]) * longitudeScale * dx +
+              (point[1] - start[1]) * dy) /
+              squared,
+          ),
+        )
+      : 0;
+    const separation =
+      ((point[0] - start[0]) * longitudeScale - fraction * dx) ** 2 +
+      (point[1] - start[1] - fraction * dy) ** 2;
+    if (separation < bestDistance) {
+      bestDistance = separation;
+      bestProgress = (travelled + lengths[index] * fraction) / total;
+    }
+    travelled += lengths[index];
+  }
+  return bestProgress;
+}
+
 /** Animate along the supplied corridor by distance; this does not estimate ETA. */
 export function routePosition(
   route: Coordinates[],

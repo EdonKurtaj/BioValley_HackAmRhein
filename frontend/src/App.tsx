@@ -168,7 +168,7 @@ export default function App() {
             </div>
             <small>
               {mode === "demo"
-                ? "Alle Transport- und Messdaten sind simuliert"
+                ? "Straßen aus OpenStreetMap · Transport- und Messdaten simuliert"
                 : "Messungen aus Supabase · Zeitstempel beachten"}
             </small>
           </div>
@@ -266,7 +266,7 @@ export default function App() {
             )}
             <div className="map-badge">
               {mode === "demo"
-                ? "Demo-LKW · illustrative Routen"
+                ? "Demo-LKW · echte Straßenrouten"
                 : "Regionale Beobachtungen · kein GPS"}
               <span>•</span>OpenStreetMap
             </div>

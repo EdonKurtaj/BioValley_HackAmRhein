@@ -94,7 +94,7 @@ PYTHONPATH=src python3 -m risk_assessment.server
 On Windows PowerShell, use the launcher:
 
 ```powershell
-.\scripts\start-dashboard.ps1
+./scripts/start-dashboard.ps1
 ```
 
 If your Python executable has a different name or path, pass `-Python <interpreter>`. The Windows launcher keeps TLS verification enabled and uses the installed Git CA bundle when an MSYS Python build lacks a default certificate file. It changes only that process environment.
@@ -114,10 +114,12 @@ Vite proxies `/api` to the backend on port 8000. For another API location, set t
 
 - Demo starts paused with four synthetic transports: urgent/stuck, normal, delayed with buffer, and a package-temperature deviation. Select a list item or map truck to inspect it.
 - Press **Abspielen** to advance one simulated minute per second. **Pause** freezes the clock; **Neustart** resets the replay.
-- The scenario selector provides normal operation, traffic with buffer, traffic with a critical deadline, temperature deviation and a suitable alternative route. A temperature hold stops the affected demo truck while its synthetic temperature history continues; its ETA is planning-only.
+- The scenario selector provides normal operation, traffic with buffer, traffic with a critical deadline, temperature deviation and a suitable alternative route. In **Geeignete Alternativroute**, BV-104 switches to a connected street alternative after five simulated minutes; the dashed path then shows the original route. Its ETA, distance and production slack update together. A temperature hold stops the affected demo truck while its synthetic temperature history continues; its ETA is planning-only.
 - The backend reuses the existing thermal, priority and decision policy. Complete Demo evidence can yield 100% coverage; this is completeness of synthetic inputs, not scientific validation.
 - Live reads all five environmental sources from Supabase and displays observation age/freshness. It has no truck GPS or package-temperature feed yet and therefore displays an empty shipment state. Live failures stay visible; they never substitute Demo data.
-- Route polylines and their distances are authored illustrative corridors, not qualified navigation routes. GPS, transport IDs, material, timing and temperatures in Demo mode are synthetic. Map tiles need internet.
+- Routes use cached full OSRM/OpenStreetMap driving geometry and MapLibre GL Directions. OSRM finds road paths; candidates are ranked by travel-time cost and a simulated closed road segment is excluded. A missing or slower/late alternative keeps the primary route. GPS, transport IDs, material, timing and temperatures are synthetic. The cache needs no routing connection during replay; map tiles need internet. These are car-profile paths without validated truck suitability or live traffic routing.
+
+To refresh the committed street-route cache, run `python3 scripts/cache-demo-road-routes.py` from the repository root (internet required). This sends only the synthetic demo endpoints to the public OSRM service. Changing demo endpoints requires refreshing this cache.
 
 Check the frontend with `npm test`, `npm run lint` and `npm run build` from frontend/. Backend/API replay checks are included in the existing root unittest command. Use `npm run format` to format the frontend.
 

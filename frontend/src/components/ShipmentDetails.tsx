@@ -148,6 +148,13 @@ export function ShipmentDetails({
           oder Produktionseinsatz ohne Freigabe.
         </p>
       )}
+      {shipment.routing && (
+        <p className="hold-note" role="status">
+          {shipment.routing.message} · {shipment.routing.candidateCount}{" "}
+          Routenkandidat(en).
+          {shipment.routing.rerouted && " Gestrichelt: ursprüngliche Route."}
+        </p>
+      )}
       <dl className="shipment-facts">
         <div>
           <dt>Start</dt>
@@ -191,9 +198,9 @@ export function ShipmentDetails({
         </div>
         {shipment.alternateEtaAt && (
           <div>
-            <dt>Alternative ETA</dt>
+            <dt>Umleitungs-ETA</dt>
             <dd>
-              {timeLabel(shipment.alternateEtaAt, true)} · geeignet im Demo-Fall
+              {timeLabel(shipment.alternateEtaAt, true)} · simulierte Fahrzeit
             </dd>
           </div>
         )}
@@ -227,8 +234,9 @@ export function ShipmentDetails({
         </p>
       </div>
       <p className="detail-limit">
-        *Illustrative Routendistanz. GPS, Temperaturen und Zeiten sind
-        simuliert. Der Index erklärt Priorität; er gibt Material nicht frei.
+        *Straßengeometrie aus OSRM / OpenStreetMap. GPS, Temperaturen und Zeiten
+        sind simuliert. Der Index erklärt Priorität; er gibt Material nicht
+        frei.
       </p>
     </aside>
   );

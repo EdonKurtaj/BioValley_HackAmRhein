@@ -75,6 +75,15 @@ export interface Shipment {
   routeName: string;
   route: Coordinates[];
   alternativeRoute: Coordinates[];
+  /** Cached road geometry; disruption and movement remain synthetic in Demo mode. */
+  routing?: {
+    source: string;
+    cachedAt: string;
+    rerouted: boolean;
+    message: string;
+    candidateCount: number;
+    blockedLocation: Coordinates | null;
+  };
   progress: number;
   distanceKm: number;
   remainingKm: number;

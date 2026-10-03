@@ -135,6 +135,24 @@ export function parseDashboard(
       throw new Error("Ungültige Transportdaten.");
     }
     ids.add(String(shipment.id));
+    if (shipment.routing !== undefined) {
+      const routing = shipment.routing;
+      if (
+        !record(routing) ||
+        !texts(routing, ["source", "message"]) ||
+        !timestamp(routing.cachedAt) ||
+        typeof routing.rerouted !== "boolean" ||
+        !finite(routing.candidateCount) ||
+        !Number.isInteger(routing.candidateCount) ||
+        routing.candidateCount < 1 ||
+        !(
+          routing.blockedLocation === null ||
+          coordinates([routing.blockedLocation])
+        )
+      ) {
+        throw new Error("Ungültige Straßenrouten-Metadaten.");
+      }
+    }
     const score = shipment.score;
     if (
       !record(score) ||

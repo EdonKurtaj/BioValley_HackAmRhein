@@ -5,7 +5,8 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import type { MapLocation, Shipment } from "../interfaces";
 import { BASEL_CENTER, BASEL_ZOOM, categories } from "../config/map";
-import { routePosition } from "../data/routePosition";
+import { routePosition, routeProgress } from "../data/routePosition";
+import { ShipmentDirections } from "../data/ShipmentDirections";
 import { actionLabels } from "../config/dashboard";
 
 // Vite must bundle the ESM worker and its shared imports as a separate asset.
@@ -30,6 +31,7 @@ export function BaselMap({
 }) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
+  const directions = useRef<ShipmentDirections | null>(null);
   const markers = useRef(new Map<string, Marker>());
   const truckMarkers = useRef(new Map<string, Marker>());
   const previousSelected = useRef<string | null>(null);
@@ -81,6 +83,8 @@ export function BaselMap({
       markers.current.clear();
       truckMarkers.current.forEach((marker) => marker.remove());
       truckMarkers.current.clear();
+      directions.current?.destroy();
+      directions.current = null;
       instance.remove();
       map.current = null;
     };
@@ -127,6 +131,8 @@ export function BaselMap({
   useEffect(() => {
     const instance = map.current;
     if (!instance) return;
+    const animations: number[] = [];
+    let disposed = false;
     const ids = new Set(shipments.map((shipment) => shipment.id));
     truckMarkers.current.forEach((marker, id) => {
       if (!ids.has(id)) {
@@ -151,7 +157,21 @@ export function BaselMap({
           .addTo(instance);
         truckMarkers.current.set(shipment.id, marker);
       }
-      marker.setLngLat(routePosition(shipment.route, shipment.progress));
+      const position = marker.getLngLat();
+      const from = routeProgress(shipment.route, [position.lng, position.lat]);
+      const started = performance.now();
+      const animate = (now: number) => {
+        if (disposed) return;
+        const fraction = Math.min(1, (now - started) / 800);
+        marker!.setLngLat(
+          routePosition(
+            shipment.route,
+            from + (shipment.progress - from) * fraction,
+          ),
+        );
+        if (fraction < 1) animations.push(requestAnimationFrame(animate));
+      };
+      animations.push(requestAnimationFrame(animate));
       marker.getElement().className = `truck-marker action-${shipment.action} ${selectedShipmentId === shipment.id ? "selected" : ""}`;
       marker
         .getElement()
@@ -166,81 +186,12 @@ export function BaselMap({
           String(selectedShipmentId === shipment.id),
         );
     }
-    const css = getComputedStyle(document.documentElement);
-    const color = (action: Shipment["action"]) =>
-      css
-        .getPropertyValue(
-          action === "quality_review"
-            ? "--danger-ink"
-            : action === "expedite" || action === "buffer"
-              ? "--warning-ink"
-              : "--green",
-        )
-        .trim();
-    const features = shipments.map((shipment) => ({
-      type: "Feature" as const,
-      geometry: { type: "LineString" as const, coordinates: shipment.route },
-      properties: {
-        color: color(shipment.action),
-        selected: shipment.id === selectedShipmentId,
-      },
-    }));
     const selected = shipments.find(
       (shipment) => shipment.id === selectedShipmentId,
     );
-    const alternate = {
-      type: "FeatureCollection" as const,
-      features: selected?.alternativeRoute.length
-        ? [
-            {
-              type: "Feature" as const,
-              geometry: {
-                type: "LineString" as const,
-                coordinates: selected.alternativeRoute,
-              },
-              properties: {},
-            },
-          ]
-        : [],
-    };
     function updateRoutes() {
-      const data = { type: "FeatureCollection" as const, features };
-      const source = instance!.getSource("shipments") as
-        maplibregl.GeoJSONSource | undefined;
-      if (source) source.setData(data);
-      else {
-        instance!.addSource("shipments", { type: "geojson", data });
-        instance!.addLayer({
-          id: "shipment-routes",
-          type: "line",
-          source: "shipments",
-          paint: {
-            "line-color": ["get", "color"],
-            "line-width": ["case", ["get", "selected"], 6, 3],
-            "line-opacity": ["case", ["get", "selected"], 0.9, 0.45],
-          },
-          layout: { "line-join": "round", "line-cap": "round" },
-        });
-      }
-      const alternativeSource = instance!.getSource("alternative") as
-        maplibregl.GeoJSONSource | undefined;
-      if (alternativeSource) alternativeSource.setData(alternate);
-      else {
-        instance!.addSource("alternative", {
-          type: "geojson",
-          data: alternate,
-        });
-        instance!.addLayer({
-          id: "alternative-route",
-          type: "line",
-          source: "alternative",
-          paint: {
-            "line-color": css.getPropertyValue("--water-ink").trim(),
-            "line-width": 4,
-            "line-dasharray": [2, 2],
-          },
-        });
-      }
+      directions.current ??= new ShipmentDirections(instance!);
+      directions.current.showShipments(shipments, selectedShipmentId);
     }
     if (instance.isStyleLoaded()) updateRoutes();
     instance.on("load", updateRoutes);
@@ -251,6 +202,8 @@ export function BaselMap({
     }
     previousSelected.current = selected?.id ?? null;
     return () => {
+      disposed = true;
+      animations.forEach(cancelAnimationFrame);
       instance.off("load", updateRoutes);
     };
   }, [shipments, selectedShipmentId, onSelectShipment]);

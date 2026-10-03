@@ -73,8 +73,11 @@ class DemoFleetTests(unittest.TestCase):
         fetch.assert_not_called()
 
     def test_reroute_never_uses_an_alternative_eta_in_the_past(self):
-        data = demo_fleet(self.anchor, 60, "reroute")["shipments"][0]
-        self.assertGreater(datetime.fromisoformat(data["alternateEtaAt"]), self.anchor + timedelta(minutes=60))
+        data = demo_fleet(self.anchor, 10, "reroute")["shipments"][0]
+        self.assertGreater(datetime.fromisoformat(data["alternateEtaAt"]), self.anchor + timedelta(minutes=10))
+        delivered = demo_fleet(self.anchor, 60, "reroute")["shipments"][0]
+        self.assertEqual(delivered["status"], "delivered")
+        self.assertIsNone(delivered["alternateEtaAt"])
 
     def test_bad_replay_inputs_are_rejected(self):
         for value in (-1, 181, float("nan"), float("inf")):

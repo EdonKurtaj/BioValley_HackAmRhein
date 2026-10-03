@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { routePosition } from "./routePosition";
+import { routePosition, routeProgress } from "./routePosition";
 
 describe("truck route replay", () => {
   const route: [number, number][] = [
@@ -26,5 +26,27 @@ describe("truck route replay", () => {
         0.5,
       ),
     ).toEqual([7.5, 47.5]);
+  });
+  it("locates a truck on the shared prefix of a rerouted path", () => {
+    const alternative: [number, number][] = [
+      route[0],
+      route[1],
+      [7.51, 47.54],
+      route[2],
+    ];
+    const truck = routePosition(route, 0.1);
+    const progress = routeProgress(alternative, truck);
+    expect(routePosition(alternative, progress)[0]).toBeCloseTo(truck[0], 9);
+    expect(routePosition(alternative, progress)[1]).toBeCloseTo(truck[1], 9);
+  });
+  it("interpolates through a street corner instead of taking a diagonal", () => {
+    const corner: [number, number][] = [
+      [7.5, 47.5],
+      [7.51, 47.5],
+      [7.51, 47.51],
+    ];
+    const point = routePosition(corner, 0.5);
+    expect(point[0]).toBeCloseTo(7.51, 8);
+    expect(point[1]).toBeGreaterThan(47.5);
   });
 });
