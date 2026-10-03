@@ -183,3 +183,23 @@ Prioritize official/primary material over generic papers:
 - [Basel-Stadt Rhine level and discharge dataset 100089](https://data.bs.ch/explore/dataset/100089/table/?flg=de-ch&sort=timestamp)
 - [Port of Switzerland water levels and navigation marks](https://port-of-switzerland.ch/hafenservice/pegel/)
 - [MeteoSwiss automatic weather station field definitions](https://opendatadocs.meteoswiss.ch/a-data-groundbased/a1-automatic-weather-stations)
+
+## OpenTransportData road evidence
+
+The observed assessment now reads the newest of the combined collector and dedicated minute-watch OpenTransportData snapshots in addition to the existing feeds. It includes the regional event/counter candidate catalogue in JSON and reports candidate counts in the terminal. Selection by radius or place-name never establishes shipment relevance. All existing score weights and package-quality rules remain in force.
+
+An optional `RoadCounterMatch` explicitly asserts that a detector's direction/lane is on the remaining shipment route, selects light or heavy vehicles, and supplies a comparable normal speed in km/h. The reference must come from documented operator knowledge or a suitable historical baseline; a speed limit is not a measured baseline. No reference is invented from the short archive. Only nonnegative finite class-specific speeds with positive class-specific flow and an observation age of 0–5 minutes are eligible. Heavy-vehicle speed is never replaced with car speed. Zero flow and missing/negative speeds remain unknown. The local signal is:
+
+```text
+speed_loss_percent = clamp(100 × (1 - measured_speed / supplied_normal_speed), 0, 100)
+```
+
+This is relative point-speed loss, not a congestion probability, travel-time multiplier, or delay estimate. One-minute sampling can be noisy; the five-minute freshness limit and 50% speed-loss action watch threshold are explicit demo policies. The ten-minute regular collector leaves periods without eligible minute-counter evidence; use its dedicated one-minute watch mode when demonstrating this component.
+
+An optional `RoadEventMatch` asserts that an operator verified location, direction, vehicle applicability and effect (`disrupted` or `restricted`) for the exact `updated_at` version in the source. New/changed versions require review again. Event snapshots must be no more than 15 minutes old; source validity must be active or defined by a current validity interval. Revoked German/French/Italian/English messages, expired/future intervals and complex recurring schedules are excluded. Older snapshots without version/validity metadata stay visible but cannot trigger an event score; refresh with the updated collector. Message text is never used to invent delay minutes or determine truck restrictions automatically.
+
+A verified current disruption uses the existing binary disturbance convention of severity 100. Combine selected eligible OpenTransportData signals with the maximum, then combine with the existing Basel traffic anomaly using the maximum, inside the existing ten-point traffic component. This prevents a message and speed reduction for the same incident being added twice. If some selected OpenTransportData evidence is unavailable, that subcomponent stays unknown unless a known signal already reaches its maximum of 100. Independent eligible Basel evidence can still contribute. Available evidence never proves that the whole route is clear.
+
+A verified restriction feeds the existing alternate-route checks; speed loss at or above the watch threshold feeds the existing buffer/expedite policy. ETA and material need-by remain supplied shipment information. No route delay is added to ETA automatically, and public data never authorizes release of unmonitored material.
+
+The observed output preserves `score` as the known weighted contribution and adds `minimum` and `maximum`: the upper bound adds the weights of unavailable components. With only traffic severity 50, the score is 5 and the missing-evidence range is 5–95. With no usable groups, score is null and the range is 0–100. These are bounds on missing component contributions, not statistical confidence intervals. Weather and Rhine retain their established applicability checks; radiation, humidity, additional river gauges and forecasts are context where no supported scoring relationship exists.

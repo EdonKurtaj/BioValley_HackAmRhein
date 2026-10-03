@@ -63,6 +63,10 @@ def calculate_priority_score(
             raise ValueError("traffic anomaly must be finite")
         # Counts indicate unusual volume only; this subscore is not a delay estimate.
         route_signals.append(_clamp(route.traffic_anomaly / TRAFFIC_ANOMALY_REFERENCE_Z * 100))
+    if route.road_traffic_severity is not None:
+        if not isfinite(route.road_traffic_severity) or not 0 <= route.road_traffic_severity <= 100:
+            raise ValueError("road severity must be finite and between 0 and 100")
+        route_signals.append(route.road_traffic_severity)
     route_score = max(route_signals) if route_signals else None
 
     urgency_score = None

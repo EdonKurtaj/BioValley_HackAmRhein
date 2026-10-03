@@ -175,6 +175,11 @@ def extract_basel_situations(xml_payload: bytes) -> list[dict]:
             "id": record.attrib.get("id"),
             "type": record.attrib.get("{http://www.w3.org/2001/XMLSchema-instance}type"),
             "created_at": child_text(record, "situationRecordCreationTime"),
+            "updated_at": child_text(record, "situationRecordVersionTime"),
+            "validity_status": child_text(record, "validityStatus"),
+            "complex_validity": any(local_name(item.tag) in {
+                "validPeriod", "exceptionPeriod", "recurringTimePeriodOfDay", "recurringDayWeekMonthPeriod"
+            } for item in record.iter()),
             "valid_from": child_text(record, "overallStartTime"),
             "valid_until": child_text(record, "overallEndTime"),
             "descriptions": unique_descriptions,

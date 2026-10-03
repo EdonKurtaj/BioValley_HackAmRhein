@@ -12,6 +12,7 @@ from urllib.error import URLError
 
 import api_requester
 import transform_port_pegel
+import opentransportdata
 
 
 class ApiArchiveTests(unittest.TestCase):
@@ -123,11 +124,16 @@ class ApiArchiveTests(unittest.TestCase):
             patch.object(transform_port_pegel, "DATA_DIR", self.data_dir),
             patch.object(transform_port_pegel, "OUTPUT_DIR", self.data_dir / "port_pegel_clean"),
             patch.object(api_requester.time, "sleep"),
+            patch.object(opentransportdata, "save_snapshot"),
             patch.object(sys, "argv", ["api_requester.py", "--once"]),
             contextlib.redirect_stdout(output),
         ):
             with (
                 patch.object(api_requester, "read_response", side_effect=successful_response),
+                patch.object(opentransportdata, "fetch_all", return_value={
+                    "errors": [], "traffic_situations": [],
+                    "traffic_counters": {"sites": [], "current_readings": []},
+                }),
                 patch.object(api_requester, "now_utc", return_value="2026-10-03T08:00:00+00:00"),
             ):
                 self.assertEqual(api_requester.main(), 0)
@@ -138,6 +144,7 @@ class ApiArchiveTests(unittest.TestCase):
             raw_before = {p.relative_to(self.root): p.read_bytes() for p in self.data_dir.glob("*/raw/*")}
             with (
                 patch.object(api_requester, "urlopen", side_effect=URLError("Network unavailable")),
+                patch.object(opentransportdata, "fetch_all", side_effect=RuntimeError("Network unavailable")),
                 patch.object(api_requester, "now_utc", return_value="2026-10-03T08:10:00+00:00"),
             ):
                 self.assertEqual(api_requester.main(), 0)
