@@ -31,7 +31,7 @@ Use the newest 52 comparable historical observations as the bounded prototype ba
 
 ## Open questions / problems
 - Remote Supabase latency and query plans have not been benchmarked; tests use a simulated database.
-- The first multiple-counter fix remains on its separate branch.
+- The first multiple-counter fix is included in the combined integration on this branch.
 
 ## Resume prompt
 > Read handoff/fix-bounded-traffic-reads.md and continue on fix/preserve-valid-port-import. Do not create another branch for this fix.

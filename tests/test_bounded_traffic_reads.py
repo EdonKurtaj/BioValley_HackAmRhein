@@ -106,6 +106,21 @@ class BoundedTrafficReadTests(unittest.TestCase):
         self.assertEqual(finding.status, "unknown")
         self.assertIsNone(finding.robust_z)
 
+    def test_bounded_reads_and_multiple_counter_fix_work_together(self):
+        second = TrafficCounterMatch("second-site", "north", 1)
+        for site, count, age in (("route-site", 1000, 2), ("second-site", 100, 1)):
+            current_at = self.now - timedelta(minutes=age)
+            self.rows.append(self.row(site, current_at, count))
+            self.rows.extend(self.row(site, current_at - timedelta(weeks=week), 100)
+                             for week in range(1, 6))
+        counters = (self.counter, second)
+        snapshot = self.fetch(counters)
+        finding = detect_traffic_disturbance(route_counters=counters, snapshot=snapshot,
+                                             historical_records=snapshot["history_results"])
+        self.assertEqual(finding.status, "detected")
+        self.assertGreater(finding.robust_z, 3)
+        self.assertEqual(len(self.queries), 5)
+
     def test_cli_passes_selected_counters_and_reuses_loaded_sources(self):
         args = build_parser().parse_args(["--traffic-counter", "route-site|north|1"])
         with patch("risk_assessment.cli.fetch_supabase_sources", return_value={}) as fetch:
