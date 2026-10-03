@@ -29,6 +29,7 @@ DATA_DIR = ROOT / "data"
 TIMEOUT_SECONDS = 30
 RHINE_RECORD_LIMIT = 48
 RAW_KEEP = 50
+TRAFFIC_POLL_SECONDS = 60
 
 SOURCES = [
     {
@@ -418,15 +419,17 @@ def create_ingestor(local_only: bool = False) -> IngestionSink | None:
     return ingestor
 
 
-def run_cycle(ingestor: IngestionSink | None = None) -> list[dict]:
-    print(f"\nChecking {len(SOURCES)} sources ({now_utc()})", flush=True)
+def run_cycle(ingestor: IngestionSink | None = None, *, sources: list[dict] | None = None) -> list[dict]:
+    """Collect selected sources; transform Port archives only on a full cycle."""
+    selected_sources = SOURCES if sources is None else sources
+    print(f"\nChecking {len(selected_sources)} sources ({now_utc()})", flush=True)
     if ingestor is not None:
         try:
             ingestor.flush()
         except Exception as exc:
             print(f"Supabase retry: FAILED — {type(exc).__name__}: {exc}", flush=True)
     results = []
-    for source in SOURCES:
+    for source in selected_sources:
         try:
             result = check_source(source)
             results.append(result)
@@ -443,6 +446,8 @@ def run_cycle(ingestor: IngestionSink | None = None) -> list[dict]:
             except Exception as exc:
                 print(f"Supabase {source['id']}: FAILED — {type(exc).__name__}: {exc}; local archives retained", flush=True)
         time.sleep(0.5)
+    if sources is not None:
+        return results
     try:
         from transform_port_pegel import save, transform
 
@@ -482,13 +487,24 @@ def main() -> int:
         if args.once:
             run_cycle(ingestor)
             return 0
-        print(f"Watching every {args.interval} seconds. Press Ctrl+C to stop.")
+        print(f"Watching regular sources every {args.interval} seconds and road traffic every {TRAFFIC_POLL_SECONDS} seconds. Press Ctrl+C to stop.")
+        traffic_sources = [source for source in SOURCES if source["kind"] == "opentransportdata"]
+        next_regular = next_traffic = time.monotonic()
         while True:
+            cycle_started = time.monotonic()
+            full_cycle = cycle_started >= next_regular
             try:
-                run_cycle(ingestor)
+                if full_cycle:
+                    run_cycle(ingestor)
+                else:
+                    run_cycle(ingestor, sources=traffic_sources)
             except Exception as exc:
                 print(f"Cycle: FAILED — {type(exc).__name__}: {exc}", flush=True)
-            time.sleep(args.interval)
+            if full_cycle:
+                next_regular = cycle_started + args.interval
+            next_traffic = cycle_started + TRAFFIC_POLL_SECONDS
+            next_cycle = min(next_regular, next_traffic) if traffic_sources else next_regular
+            time.sleep(max(0.0, next_cycle - time.monotonic()))
     except KeyboardInterrupt:
         print("\nStopped.")
         return 0

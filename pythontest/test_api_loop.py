@@ -4,7 +4,7 @@ import contextlib
 import io
 import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import api_requester
 import transform_port_pegel
@@ -75,6 +75,7 @@ class PollingResilienceTests(unittest.TestCase):
             patch.object(sys, "argv", ["api_requester.py", "--interval", "7"]),
             patch.object(api_requester, "run_cycle", side_effect=[TypeError("Unexpected cycle"), [], KeyboardInterrupt]) as cycle,
             patch.object(api_requester.time, "sleep") as sleep,
+            patch.object(api_requester.time, "monotonic", side_effect=[0, 0, 0, 7, 7, 14]),
         ):
             self.assertEqual(api_requester.main(), 0)
         self.assertEqual(cycle.call_count, 3)
@@ -101,10 +102,57 @@ class PollingResilienceTests(unittest.TestCase):
             patch.object(sys, "argv", ["api_requester.py", "--interval", "7"]),
             patch.object(api_requester, "check_source", side_effect=check_source) as check,
             patch.object(api_requester.time, "sleep", side_effect=sleep),
+            patch.object(api_requester.time, "monotonic", side_effect=[0, 0, 0, 7, 7]),
         ):
             self.assertEqual(api_requester.main(), 0)
         self.assertEqual(check.call_count, 2 * len(api_requester.SOURCES))
         self.assertIn("Stopped.", self.output.getvalue())
+
+    def test_road_traffic_polls_each_minute_without_repolling_regular_sources(self):
+        clock = 0
+        cycles = []
+        traffic = [source for source in api_requester.SOURCES if source["kind"] == "opentransportdata"]
+
+        def collect(_ingestor, *, sources=None):
+            nonlocal clock
+            cycles.append((clock, api_requester.SOURCES if sources is None else sources))
+            if clock >= 600:
+                raise KeyboardInterrupt
+            started = clock
+            clock += 20  # Collection duration must not add drift to the interval.
+            if started == 60:
+                raise RuntimeError("Temporary traffic failure")
+
+        def sleep(seconds):
+            nonlocal clock
+            clock += seconds
+
+        with (
+            patch.object(sys, "argv", ["api_requester.py"]),
+            patch.object(api_requester, "run_cycle", side_effect=collect),
+            patch.object(api_requester.time, "sleep", side_effect=sleep),
+            patch.object(api_requester.time, "monotonic", side_effect=lambda: clock),
+        ):
+            self.assertEqual(api_requester.main(), 0)
+        self.assertEqual(cycles[0], (0, api_requester.SOURCES))
+        self.assertEqual(cycles[-1], (600, api_requester.SOURCES))
+        self.assertEqual(cycles[1:-1], [(minute * 60, traffic) for minute in range(1, 10)])
+        self.assertIn("Temporary traffic failure", self.output.getvalue())
+
+    def test_traffic_cycle_uses_existing_ingestion_and_skips_port_transform(self):
+        traffic = [source for source in api_requester.SOURCES if source["kind"] == "opentransportdata"]
+        sink = MagicMock()
+        result = {"source_id": traffic[0]["id"], "request_ok": True}
+        with (
+            patch.object(api_requester, "check_source", return_value=result) as check,
+            patch.object(api_requester.time, "sleep"),
+            patch.object(transform_port_pegel, "transform") as transform,
+        ):
+            self.assertEqual(api_requester.run_cycle(sink, sources=traffic), [result])
+        check.assert_called_once_with(traffic[0])
+        sink.flush.assert_called_once_with()
+        sink.ingest.assert_called_once_with(traffic[0], result)
+        transform.assert_not_called()
 
     def test_keyboard_interrupt_is_not_swallowed_by_source_or_transform(self):
         for stage in ("source", "transform"):
