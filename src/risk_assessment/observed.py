@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 from math import isfinite
 from pathlib import Path
@@ -14,6 +15,7 @@ from .config import (
     TRAFFIC_ANOMALY_THRESHOLD,
 )
 from .disturbance import detect_open_data_disturbances, detect_traffic_disturbance, score_weather_context
+from .decision import decide_action, suggestion_from_assessment
 from .interfaces import RouteEvidence
 from .local_data import DEFAULT_DATA_DIR, collect_local_context, read_snapshot
 from .logistics import RhineStatus, classify_rhine_high_water
@@ -83,13 +85,17 @@ def assess_observed_data(
         **weather_signal,
         "source_status": weather.get("source_status", "unknown"),
         "last_observation_severity": weather_signal["score"],
-        "current_score_eligible": weather.get("source_status") == "observed",
+        "current_score_eligible": weather.get("source_status") == "observed" and route.exposed_handling is True,
     }
     if weather.get("source_status") != "observed":
         weather_signal["status"] = weather.get("source_status", "unknown")
         weather_signal["evidence"] = [f"Weather feed is {weather.get('source_status', 'unknown')}; last observation is context only and excluded from the current score."]
 
-    traffic_finding = detect_traffic_disturbance(data_dir)
+    if weather.get("source_status") == "observed" and route.exposed_handling is not True:
+        weather_signal["status"] = "context only"
+        weather_signal["evidence"] = ["No exposed shipment handling was confirmed; station weather is context only."]
+
+    traffic_finding = detect_traffic_disturbance(data_dir, route.traffic_counters)
     traffic_severity = None
     if traffic_finding.robust_z is not None:
         traffic_severity = min(100.0, max(0.0, traffic_finding.robust_z / TRAFFIC_ANOMALY_THRESHOLD * 100.0))
@@ -106,7 +112,7 @@ def assess_observed_data(
     port_level_for_score = level if port_is_fresh else None
     rhine_status = (classify_rhine_high_water(port_level_for_score, route_segment) if port_is_fresh else
                     RhineStatus("unknown", route_segment, level,
-                                f"Port gauge snapshot is {rhine.get('source_status', 'unknown')} and is excluded from the current score."))
+                                f"{rhine.get('port_freshness_reason', 'Port measurement freshness is unknown')} Excluded from the current score."))
 
     components = [
         _component("weather", weather_signal["status"],
@@ -138,38 +144,17 @@ def assess_observed_data(
     evidence_coverage = len(known) / len(components) * 100
     coverage = evidence_coverage
     score = round(sum(item["contributed_points"] for item in known), 1) if known else None
-    route_trigger = rhine_status.status in ("pre_alert", "restricted") or traffic_finding.status == "detected"
-
-    if rhine_status.status == "restricted" and route.alternate_route_available:
-        suggestion = "Reroute"
-        suggestion_reason = "A matching ship-leg restriction is present and a feasible alternate route is available."
-    elif (urgency_score is not None and urgency_score >= 70) or (score is not None and score >= 50):
-        suggestion = "Expedite"
-        suggestion_reason = "Production urgency is high; prioritize delivery/receiving."
-    elif (urgency_score is not None and urgency_score >= 50) or route_trigger or (score is not None and score >= 20):
-        suggestion = "Buffer"
-        suggestion_reason = "Combined evidence indicates elevated risk; protect production slack and monitor the shipment."
-    elif evidence_coverage < 50:
-        suggestion = "Monitor"
-        suggestion_reason = (f"Only {len(known)} of {len(components)} evidence groups have usable inputs; collect package-temperature "
-                            "and ETA data before calling it normal.")
-    else:
-        suggestion = "Normal"
-        suggestion_reason = "Combined score is below intervention thresholds and evidence coverage is adequate."
-
-    weather_score = weather_signal["score"]
-    if rhine_status.status == "restricted" and route.alternate_route_available:
-        action = "reroute"
-        reason = "The current Port gauge meets a restriction for the supplied ship leg, and an alternate route is available."
-    elif route.estimated_arrival_at and route.material_needed_at and urgency_score and urgency_score > 0:
-        action = "expedite"
-        reason = "Caller-supplied ETA leaves less than the configured production buffer."
-    elif route_trigger:
-        action = "buffer"
-        reason = "Observed route-related evidence indicates a disturbance; retain controlled stock while the route is assessed."
-    else:
-        action = "normal"
-        reason = "No actionable disturbance is present in the scored current observations; unobserved shipment conditions remain unknown."
+    matched_route = replace(
+        route,
+        route_restricted=route.route_restricted or rhine_status.status == "restricted",
+        disruption_observed=True if rhine_status.status == "pre_alert" else route.disruption_observed,
+        traffic_anomaly=traffic_finding.robust_z,
+        traffic_route_matched=traffic_finding.robust_z is not None,
+        weather_severity=weather_signal["score"] if weather_signal["current_score_eligible"] else None,
+    )
+    assessment = decide_action(None, matched_route, observed_only=True)
+    system_suggestion = suggestion_from_assessment(assessment)
+    action, reason = assessment.action, assessment.reason
 
     current_traffic = traffic_finding.__dict__
     traffic_snapshot = read_snapshot(data_dir, "basel_dataset_100006") or {}
@@ -181,7 +166,7 @@ def assess_observed_data(
         except ValueError:
             return float("-inf")
     newest_traffic = max(traffic_rows, key=record_time) if traffic_rows else None
-    traffic_context = context.get("traffic") or {}
+    traffic_context = {**(context.get("traffic") or {}), "baseline_available": traffic_finding.robust_z is not None}
     considered_data = []
     omitted_data = []
     if components[0]["contributed_points"] is not None:
@@ -209,7 +194,7 @@ def assess_observed_data(
         omitted_data.append(
             "Weather score omitted: last readings were "
             f"{weather_values} ({_format_age(weather.get('observation_age_minutes'))}); "
-            f"the feed is {weather.get('source_status', 'unknown')} or a required value is missing."
+            + "; ".join(weather_signal["evidence"])
         )
         present_context = _weather_context_values(weather.get("measurements") or {})
         if present_context:
@@ -231,7 +216,7 @@ def assess_observed_data(
     if rhine_status.status != "unknown":
         considered_data.append(
             f"Port of Switzerland gauge: {level} cm, scored for ship leg {route_segment} "
-            f"({_format_age(rhine.get('port_snapshot_age_minutes'))})."
+            f"(measurement {_format_age(rhine.get('port_observation_age_minutes'))})."
         )
     else:
         rhine_gauge_note = (
@@ -264,7 +249,7 @@ def assess_observed_data(
         "mode": "observed data only; no package-temperature curve, route disruption, or ETA is simulated",
         "pipeline": ["Open data", "Disturbance detection", "Risk assessment", "Manufacturing decision", "Factory dashboard"],
         "action": {"recommendation": action, "reason": reason},
-        "system_suggestion": {"suggestion": suggestion, "reason": suggestion_reason},
+        "system_suggestion": system_suggestion,
         "manufacturing_priority_score": {
             "score": score,
             "coverage_percent": round(coverage, 1),
@@ -282,7 +267,7 @@ def assess_observed_data(
             "rhine": {**rhine, "shipment_segment": route_segment,
                       "finding": rhine_status.__dict__},
         },
-        "detected_open_data_disturbances": detect_open_data_disturbances(data_dir),
+        "detected_open_data_disturbances": detect_open_data_disturbances(data_dir, route.traffic_counters, route_segment),
     }
 
 
@@ -323,7 +308,8 @@ def render_observed_summary(result: dict) -> str:
         f"direction {weather_measurements.get('dkl010z0', 'unknown')}°, pressure {weather_measurements.get('prestas0', 'unknown')} hPa; "
         "not scored without a supported relationship/exposed transfer.",
         f"Rhine: Port gauge {port.get('value', 'unknown')} cm ({rhine.get('source_status', 'unknown')}, "
-        f"snapshot {_format_age(rhine.get('port_snapshot_age_minutes'))}); "
+        f"measurement {_format_age(rhine.get('port_observation_age_minutes'))}, "
+        f"page fetch {_format_age(rhine.get('port_snapshot_age_minutes'))}); "
         f"Basel-Stadt gauge {basel_gauge.get('pegelhoehe', 'unknown')} cm ({_format_age(rhine.get('basel_stadt_observation_age_minutes'))}) "
         f"and discharge {basel_gauge.get('abfluss', 'unknown')} m³/s; "
         f"ship leg {'supplied' if rhine.get('shipment_segment') else 'not supplied'}, so route effect {'scored' if components['rhine']['contributed_points'] is not None else 'excluded'}.",

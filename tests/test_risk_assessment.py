@@ -6,7 +6,7 @@ from pathlib import Path
 
 from risk_assessment.decision import decide_action
 from risk_assessment.disturbance import detect_traffic_disturbance, score_weather_context
-from risk_assessment.interfaces import ExposureMetrics, RouteEvidence, TemperatureReading
+from risk_assessment.interfaces import ExposureMetrics, RouteEvidence, TemperatureReading, TrafficCounterMatch
 from risk_assessment.logistics import classify_rhine_high_water, traffic_volume_anomaly
 from risk_assessment.observed import assess_observed_data
 from risk_assessment.priority import calculate_priority_score
@@ -19,7 +19,7 @@ class ThermalTests(unittest.TestCase):
         result = analyze_temperature_series([
             TemperatureReading(start, 7, 0),
             TemperatureReading(start + timedelta(minutes=10), 9, 0),
-        ])
+        ], monitoring_started_at=start, evaluated_at=start + timedelta(minutes=10))
         self.assertAlmostEqual(result.minutes_above_max, 5)
         self.assertAlmostEqual(result.hot_degree_hours, 2.5 / 60)
         self.assertAlmostEqual(result.peak_above_max_c, 1)
@@ -29,22 +29,27 @@ class ThermalTests(unittest.TestCase):
         result = analyze_temperature_series([
             TemperatureReading(start, 9, 0),
             TemperatureReading(start + timedelta(minutes=20), 9, 0),
-        ])
+        ], monitoring_started_at=start, evaluated_at=start + timedelta(minutes=20))
         self.assertEqual(result.minutes_above_max, 0)
         self.assertTrue(result.incomplete_history)
         self.assertTrue(result.quality_review_required)
 
     def test_uncertainty_touching_boundary_requires_review(self):
         start = datetime(2026, 1, 1, tzinfo=timezone.utc)
-        result = analyze_temperature_series([TemperatureReading(start, 7.5, 0.5)])
+        result = analyze_temperature_series([TemperatureReading(start, 7.5, 0.5)],
+                                            monitoring_started_at=start,
+                                            evaluated_at=start + timedelta(minutes=1))
         self.assertEqual(result.borderline_readings, 1)
         self.assertTrue(result.quality_review_required)
 
     def test_exact_boundary_is_in_range_but_missing_accuracy_requires_review(self):
         start = datetime(2026, 1, 1, tzinfo=timezone.utc)
-        exact = analyze_temperature_series([TemperatureReading(start, 8, 0)])
+        end = start + timedelta(minutes=10)
+        exact = analyze_temperature_series([TemperatureReading(start, 8, 0), TemperatureReading(end, 8, 0)],
+                                            monitoring_started_at=start, evaluated_at=end)
         self.assertFalse(exact.quality_review_required)
-        unknown_accuracy = analyze_temperature_series([TemperatureReading(start, 5)])
+        unknown_accuracy = analyze_temperature_series([TemperatureReading(start, 5), TemperatureReading(end, 5)],
+                                                       monitoring_started_at=start, evaluated_at=end)
         self.assertTrue(unknown_accuracy.sensor_accuracy_unknown)
         self.assertTrue(unknown_accuracy.quality_review_required)
 
@@ -67,7 +72,10 @@ class DecisionTests(unittest.TestCase):
 
     def test_restriction_with_alternate_route_reroutes(self):
         thermal = ExposureMetrics(0, 0, 0, 0, 0, 0)
-        route = RouteEvidence(route_restricted=True, alternate_route_available=True)
+        now = datetime.now(timezone.utc)
+        route = RouteEvidence(route_restricted=True, alternate_route_available=True,
+                              alternate_route_suitable=True, estimated_arrival_at=now + timedelta(hours=2),
+                              alternate_arrival_at=now + timedelta(hours=1), material_needed_at=now + timedelta(hours=4))
         self.assertEqual(decide_action(thermal, route).action, "reroute")
 
     def test_missing_telemetry_requires_review(self):
@@ -106,7 +114,7 @@ class PriorityScoreTests(unittest.TestCase):
         self.assertIsNone(score.components["thermal"])
 
     def test_traffic_anomaly_scales_to_watch_threshold(self):
-        route = RouteEvidence(traffic_anomaly=1.5)
+        route = RouteEvidence(traffic_anomaly=1.5, traffic_route_matched=True)
         score = calculate_priority_score(None, route)
         self.assertEqual(score.components["route"], 50)
         self.assertEqual(score.minimum, 17.5)
@@ -155,7 +163,7 @@ class ObservedDataScoreTests(unittest.TestCase):
                 "current_readings": [{"name": "Basel-Rheinhalle", "value": 479, "unit": "cm"}],
                 "flood_thresholds": [{"mark": "I", "water_level": 700}],
             }), encoding="utf-8")
-            result = assess_observed_data(root)
+            result = assess_observed_data(root, RouteEvidence(exposed_handling=True))
 
         score = result["manufacturing_priority_score"]
         self.assertEqual(score["score"], 0)
@@ -211,7 +219,7 @@ class LogisticsTests(unittest.TestCase):
             directory.mkdir()
             snapshot = {"request_ok": True, "data": {"results": records}}
             (directory / "latest.json").write_text(json.dumps(snapshot), encoding="utf-8")
-            finding = detect_traffic_disturbance(Path(temporary))
+            finding = detect_traffic_disturbance(Path(temporary), (TrafficCounterMatch("counter-1", "north", 1),))
         self.assertEqual(finding.status, "detected")
         self.assertIn("does not prove congestion", finding.action_effect)
 

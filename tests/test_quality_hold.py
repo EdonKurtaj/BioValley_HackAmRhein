@@ -15,7 +15,7 @@ class QualityHoldTests(unittest.TestCase):
         thermal = analyze_temperature_series([
             TemperatureReading(now, 10, 0),
             TemperatureReading(now + timedelta(minutes=15), 10, 0),
-        ])
+        ], monitoring_started_at=now, evaluated_at=now + timedelta(minutes=15))
         route = RouteEvidence(
             disruption_observed=False,
             estimated_arrival_at=now + timedelta(hours=1),
@@ -60,10 +60,14 @@ class QualityHoldTests(unittest.TestCase):
         now = datetime.now(timezone.utc)
         thermal = ExposureMetrics(0, 0, 0, 0, 0, 0)
         routes = [
-            (RouteEvidence(route_restricted=True, alternate_route_available=True), "Reroute"),
-            (RouteEvidence(disruption_observed=False, estimated_arrival_at=now,
+            (RouteEvidence(route_restricted=True, alternate_route_available=True, alternate_route_suitable=True,
+                           estimated_arrival_at=now + timedelta(hours=2),
+                           alternate_arrival_at=now + timedelta(hours=1),
+                           material_needed_at=now + timedelta(hours=4)), "Reroute"),
+            (RouteEvidence(disruption_observed=False, exposed_handling=False, estimated_arrival_at=now,
                            material_needed_at=now), "Expedite"),
-            (RouteEvidence(disruption_observed=True), "Buffer"),
+            (RouteEvidence(disruption_observed=True, exposed_handling=False, estimated_arrival_at=now,
+                           material_needed_at=now + timedelta(hours=8)), "Buffer"),
         ]
         for route, expected in routes:
             with self.subTest(expected=expected):

@@ -16,7 +16,9 @@ class TemperatureReading:
 
 @dataclass(frozen=True)
 class ExposureMetrics:
-    """Measured or simulated thermal exposure over a time series."""
+    """Thermal exposure; incomplete_history includes missing interval coverage,
+    single readings, stale endpoints, unknown monitoring start, and sensor gaps.
+    """
 
     minutes_above_max: float
     minutes_below_min: float
@@ -32,6 +34,15 @@ class ExposureMetrics:
 
 
 @dataclass(frozen=True)
+class TrafficCounterMatch:
+    """A counter, direction and lane explicitly mapped to a shipment route."""
+
+    sitecode: str
+    directionname: str
+    lanecode: int
+
+
+@dataclass(frozen=True)
 class RouteEvidence:
     """Route evidence must be explicit; absent inputs remain unknown."""
 
@@ -43,13 +54,19 @@ class RouteEvidence:
     material_needed_at: datetime | None = None
     buffer_hours: float = 4.0
     evidence: tuple[str, ...] = ()
+    traffic_counters: tuple[TrafficCounterMatch, ...] = ()
+    traffic_route_matched: bool = False
+    exposed_handling: bool | None = None
+    weather_severity: float | None = None
+    alternate_route_suitable: bool | None = None
+    alternate_arrival_at: datetime | None = None
 
 
 @dataclass(frozen=True)
 class Assessment:
     """Explainable action and separate thermal/logistics evidence."""
 
-    action: Literal["normal", "buffer", "expedite", "reroute", "quality_review"]
+    action: Literal["normal", "buffer", "expedite", "reroute", "quality_review", "monitor"]
     reason: str
     thermal_status: str
     logistics_status: str

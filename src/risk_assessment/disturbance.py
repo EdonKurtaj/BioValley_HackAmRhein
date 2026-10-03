@@ -22,7 +22,8 @@ from .config import (
     TRAFFIC_ANOMALY_THRESHOLD,
     TRAFFIC_FRESHNESS_MINUTES,
 )
-from .logistics import traffic_volume_anomaly
+from .interfaces import TrafficCounterMatch
+from .logistics import classify_rhine_high_water, traffic_volume_anomaly
 from .local_data import DEFAULT_DATA_DIR, collect_local_context, read_snapshot
 
 
@@ -112,13 +113,20 @@ def _observation_age_minutes(timestamp: str | None) -> float | None:
     return max(0.0, (datetime.now(timezone.utc) - observed.astimezone(timezone.utc)).total_seconds() / 60)
 
 
-def detect_traffic_disturbance(data_dir: Path = DEFAULT_DATA_DIR) -> Disturbance:
+def detect_traffic_disturbance(
+    data_dir: Path = DEFAULT_DATA_DIR, route_counters: tuple[TrafficCounterMatch, ...] = (),
+) -> Disturbance:
     """Compare newest traffic row to older same-counter, weekday, and hour rows."""
     snapshot = read_snapshot(data_dir, "basel_dataset_100006")
     if not snapshot or not snapshot.get("request_ok"):
         return Disturbance("Basel traffic counts", "unknown", "Traffic observations are unavailable.", (),
                            "No traffic-based decision.")
-    records = _read_traffic_records(data_dir)
+    if not route_counters:
+        return Disturbance("Basel traffic counts", "unknown", "No traffic counters are mapped to this shipment route.", (),
+                           "No traffic-based decision.")
+    matches = {(item.sitecode, item.directionname, item.lanecode) for item in route_counters}
+    records = [row for row in _read_traffic_records(data_dir)
+               if (row.get("sitecode"), row.get("directionname"), row.get("lanecode")) in matches]
     if not records:
         return Disturbance("Basel traffic counts", "unknown", "No usable traffic records were saved.", (),
                            "No traffic-based decision.")
@@ -160,9 +168,12 @@ def detect_traffic_disturbance(data_dir: Path = DEFAULT_DATA_DIR) -> Disturbance
                        (anomaly.reason,), "No traffic-based decision.", anomaly.robust_z)
 
 
-def detect_open_data_disturbances(data_dir: Path = DEFAULT_DATA_DIR) -> list[dict]:
+def detect_open_data_disturbances(
+    data_dir: Path = DEFAULT_DATA_DIR, route_counters: tuple[TrafficCounterMatch, ...] = (),
+    route_segment: str | None = None,
+) -> list[dict]:
     """Return data-supported events; environmental context is not a package excursion."""
-    traffic = detect_traffic_disturbance(data_dir)
+    traffic = detect_traffic_disturbance(data_dir, route_counters)
     context = collect_local_context(data_dir)
     weather = context.get("weather") or {}
     rhine = context.get("rhine") or {}
@@ -178,12 +189,18 @@ def detect_open_data_disturbances(data_dir: Path = DEFAULT_DATA_DIR) -> list[dic
         tuple(weather_context["evidence"]),
         "Handling context only; no package excursion can be inferred from station weather.",
     )
-    river_status = "unknown"
+    port = rhine.get("port_basel_rheinhalle") or {}
+    level = port.get("value") if rhine.get("source_status") == "observed snapshot" else None
+    try:
+        level = float(level) if level is not None else None
+    except (TypeError, ValueError):
+        level = None
+    finding = classify_rhine_high_water(level, route_segment)
+    river_status = ("detected" if finding.status in ("pre_alert", "restricted") else
+                    "no_anomaly" if finding.status == "no_high_water_trigger" else "unknown")
     river = Disturbance(
-        "Port of Switzerland Rhine gauge", river_status,
-        "Current gauge is available, but no shipment ship-leg segment was supplied."
-        if rhine.get("source_status") == "observed snapshot" else "Port gauge is missing or stale.",
+        "Port of Switzerland Rhine gauge", river_status, finding.reason,
         ("A river reading affects a shipment only on a matching ship leg.",),
-        "No river-based route action without a matching ship-leg section.",
+        "Verify route alternatives and ETA before a logistics recommendation.",
     )
     return [asdict(item) for item in (weather_disturbance, traffic, river)]

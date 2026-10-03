@@ -8,10 +8,6 @@ from math import isfinite
 from .interfaces import Assessment, ExposureMetrics, RouteEvidence
 from .priority import TRAFFIC_ANOMALY_REFERENCE_Z, PriorityScore
 
-SYSTEM_BUFFER_THRESHOLD = 20.0
-SYSTEM_EXPEDITE_THRESHOLD = 50.0
-SYSTEM_URGENCY_EXPEDITE_THRESHOLD = 70.0
-SYSTEM_NORMAL_MIN_COVERAGE = 50.0
 QUALITY_HOLD_REASON = (
     "Package-temperature evidence is missing, uncertain, incomplete, or outside its handling band. "
     "Keep the material in controlled storage and hold for qualified review; "
@@ -19,78 +15,75 @@ QUALITY_HOLD_REASON = (
 )
 
 
-def decide_action(thermal: ExposureMetrics | None, route: RouteEvidence) -> Assessment:
-    """Apply deterministic decision rules; quality review takes precedence."""
+def decide_action(
+    thermal: ExposureMetrics | None, route: RouteEvidence, *, observed_only: bool = False,
+) -> Assessment:
+    """One policy for scenarios and observed planning; scores never authorize action.
+
+    Observed-only recommendations are logistics advice, not permission to release
+    unmonitored material. Normal requires complete package and shipment evidence.
+    """
     if not isfinite(route.buffer_hours) or route.buffer_hours < 0:
         raise ValueError("buffer hours must be finite and non-negative")
-    if route.traffic_anomaly is not None and not isfinite(route.traffic_anomaly):
-        raise ValueError("traffic anomaly must be finite")
-    for timestamp in (route.estimated_arrival_at, route.material_needed_at):
+    for value in (route.traffic_anomaly, route.weather_severity):
+        if value is not None and not isfinite(value):
+            raise ValueError("shipment signals must be finite")
+    if route.weather_severity is not None and not 0 <= route.weather_severity <= 100:
+        raise ValueError("weather severity must be between 0 and 100")
+    for timestamp in (route.estimated_arrival_at, route.material_needed_at, route.alternate_arrival_at):
         if timestamp is not None and (timestamp.tzinfo is None or timestamp.utcoffset() is None):
             raise ValueError("logistics timestamps must include a timezone")
-    if thermal is None or thermal.quality_review_required:
-        return Assessment("quality_review", QUALITY_HOLD_REASON, "review required", "onward delivery blocked", thermal, route.evidence)
+    thermal_status = "unobserved; logistics advice only" if thermal is None else "within configured band"
 
-    if route.route_restricted and route.alternate_route_available:
-        return Assessment("reroute", "A route restriction is reported and a feasible alternate route is available.",
-                          "within configured band", "restricted; alternate available", thermal, route.evidence)
+    def result(action, reason, status):
+        return Assessment(action, reason, thermal_status, status, thermal, route.evidence)
 
-    slack_hours = None
-    if route.estimated_arrival_at and route.material_needed_at:
-        slack_hours = (route.material_needed_at - route.estimated_arrival_at).total_seconds() / 3600
-    if slack_hours is not None and slack_hours < route.buffer_hours:
-        return Assessment("expedite", f"Estimated receipt leaves {slack_hours:.1f} h of production slack, below the {route.buffer_hours:g} h scenario buffer.",
-                          "within configured band", "slack below buffer", thermal, route.evidence)
+    if (thermal is None and not observed_only) or (thermal is not None and thermal.quality_review_required):
+        return Assessment("quality_review", QUALITY_HOLD_REASON, "review required",
+                          "onward delivery blocked", thermal, route.evidence)
 
-    if route.disruption_observed is True or route.route_restricted:
-        return Assessment("buffer", "A route disruption is indicated, while available evidence does not justify a feasible reroute or expedite.",
-                          "within configured band", "disruption indicated", thermal, route.evidence)
+    eta, needed, alternate = route.estimated_arrival_at, route.material_needed_at, route.alternate_arrival_at
+    disrupted = route.disruption_observed is True or route.route_restricted
+    if disrupted and route.alternate_route_available:
+        if (route.alternate_route_suitable is True and eta is not None and needed is not None
+                and alternate is not None and alternate < eta and alternate <= needed):
+            return result("reroute", "A shipment route disturbance has a verified suitable alternative arriving earlier and before material need-by.",
+                          "suitable alternate and acceptable ETA")
+    if route.route_restricted:
+        return result("monitor", "The route is restricted; verify a suitable alternative and its ETA before dispatch.", "restricted; no verified feasible alternative")
+    if eta is None or needed is None:
+        return result("monitor", "Shipment ETA and material need-by time are required before selecting a transport action.", "timing unknown")
+    traffic = (route.traffic_route_matched and route.traffic_anomaly is not None
+               and route.traffic_anomaly >= TRAFFIC_ANOMALY_REFERENCE_Z)
+    weather = (route.exposed_handling is True and route.weather_severity is not None
+               and route.weather_severity > 0)
+    if (route.exposed_handling is None
+            or (route.exposed_handling is True and route.weather_severity is None)):
+        return result("monitor", "Handling conditions are unknown; verify protected or exposed transfer conditions before dispatch.", "handling evidence incomplete")
+    if route.disruption_observed is None and not traffic and not weather:
+        return result("monitor", "Shipment route status is unknown; verify route evidence before dispatch.", "route evidence incomplete")
+    slack = (needed - eta).total_seconds() / 3600
+    if slack < route.buffer_hours:
+        return result("expedite", f"Estimated receipt leaves {slack:.1f} h of production slack, below the {route.buffer_hours:g} h buffer.", "slack below buffer")
+    if disrupted or traffic or weather:
+        return result("buffer", "Shipment-related disturbance has sufficient production slack; retain material in controlled storage.", "disturbance with sufficient slack")
+    if (thermal is None or route.disruption_observed is None
+            or route.exposed_handling is None
+            or (route.exposed_handling is True and route.weather_severity is None)):
+        return result("monitor", "Package, route or handling evidence is incomplete; do not classify the shipment as normal.", "shipment evidence incomplete")
+    return result("normal", "Package evidence, route status, handling context and production slack have no intervention trigger; this is not a quality release.", "no modeled trigger")
 
-    if (route.disruption_observed is None and route.traffic_anomaly is None
-            and route.estimated_arrival_at is None and route.material_needed_at is None):
-        logistics_status = "unknown"
-    else:
-        logistics_status = "no actionable disruption evidence"
-    return Assessment("normal", "No modeled trigger requires intervention; this is not a product-quality release decision.",
-                      "within configured band", logistics_status, thermal, route.evidence)
+
+def suggestion_from_assessment(assessment: Assessment) -> dict[str, str]:
+    """Present the same decision and explanation in the operator suggestion."""
+    return {"suggestion": ("Quality review" if assessment.action == "quality_review" else assessment.action.title()), "reason": assessment.reason}
 
 
 def suggest_system_action(
-    thermal: ExposureMetrics | None,
-    route: RouteEvidence,
-    priority: PriorityScore,
+    thermal: ExposureMetrics | None, route: RouteEvidence, priority: PriorityScore,
 ) -> dict[str, str]:
-    """Map the weighted score and hard safety/logistics triggers to one suggestion."""
-    if thermal is None or thermal.quality_review_required:
-        return {"suggestion": "Quality review", "reason": QUALITY_HOLD_REASON}
-    if route.route_restricted and route.alternate_route_available:
-        logistics_suggestion = "Reroute"
-        logistics_reason = "A matching route restriction is present and a feasible alternate route is available."
-    else:
-        urgency = priority.components.get("urgency")
-        if (priority.minimum >= SYSTEM_EXPEDITE_THRESHOLD
-                or (urgency is not None and urgency >= SYSTEM_URGENCY_EXPEDITE_THRESHOLD)):
-            logistics_suggestion = "Expedite"
-            logistics_reason = (f"Combined weighted risk is {priority.minimum:.1f}/100, or production urgency is high; "
-                                "prioritize delivery/receiving.")
-        else:
-            traffic_trigger = (route.traffic_anomaly is not None
-                               and route.traffic_anomaly >= TRAFFIC_ANOMALY_REFERENCE_Z)
-            if (priority.minimum >= SYSTEM_BUFFER_THRESHOLD or route.disruption_observed is True
-                    or route.route_restricted or traffic_trigger):
-                logistics_suggestion = "Buffer"
-                logistics_reason = (f"Combined weighted risk is {priority.minimum:.1f}/100 or a route disturbance is present; "
-                                    "protect production slack and monitor the shipment.")
-            elif priority.coverage_percent < SYSTEM_NORMAL_MIN_COVERAGE:
-                logistics_suggestion = "Monitor"
-                logistics_reason = (f"Only {priority.evidence_coverage_available} of "
-                                    f"{priority.evidence_coverage_total} input groups have evidence; "
-                                    "collect shipment temperature and ETA data before calling it normal.")
-            else:
-                logistics_suggestion = "Normal"
-                logistics_reason = "Combined score is below the intervention thresholds and evidence coverage is adequate."
-
-    return {"suggestion": logistics_suggestion, "reason": logistics_reason}
+    """Compatibility entry point; priority is informational, not an action rule."""
+    return suggestion_from_assessment(decide_action(thermal, route))
 
 
 def parse_time(value: str | None) -> datetime | None:

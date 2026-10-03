@@ -33,3 +33,32 @@ Implemented on `feat/local-risk-assessment`; calculations run from saved request
 - Shared hold wording and early return prevent score, deadline, or alternate-route triggers from producing combined delivery recommendations.
 - Regression tests cover measured 10 °C exposure with ample slack, missing/uncertain/incomplete evidence, deadline/restriction overrides, and unaffected logistics paths.
 - Remaining review findings are outside this correction; the four existing score-weight test failures remain to be addressed separately.
+
+## Temperature-history correction — done
+
+- Added keyword-only `evaluated_at` (defaults to current UTC) and `monitoring_started_at` to the thermal analyzer. Missing start, fewer than two readings, missing beginning, stale last reading, and internal gaps require quality review and omit the thermal score.
+- The existing configurable `max_gap` (15-minute demo default) also bounds endpoint age; no unmeasured exposure is extrapolated. Invalid time boundaries and readings outside the interval are rejected.
+- Scenario CLI passes the explicit simulated interval and exposes `incomplete_history`; historical tests now use explicit evaluation times.
+- Nine new regression tests and the three quality-hold tests pass. The four previously known score-weight failures remain outside this correction.
+
+## Port measurement-freshness correction — done
+
+- Rhine eligibility now uses the selected Basel-Rheinhalle measurement timestamp, with a named 30-minute demo freshness limit. Fetch age remains informational only.
+- Parse page timestamps in Europe/Zurich and aware ISO timestamps into UTC; missing, invalid, future and DST-ambiguous/nonexistent times are unknown and excluded.
+- JSON reports observation age, UTC timestamp and freshness reason; terminal shows measurement and page-fetch age separately.
+- Seven regression tests pass, including a freshly fetched 2020 reading that cannot trigger rerouting and fresh readings that still can. The four pre-existing score-weight test failures remain open.
+
+## Temperature-boundary correction — done
+
+- Evaluate the non-positive case before the non-negative case in `_positive_duration`; two zero deviations now contribute zero excursion minutes.
+- Five new regression tests cover constant 2/8 °C, boundary-to-in-band transitions, boundary-to-outside transitions in both directions, actual crossings, and preserved sensor-uncertainty review.
+- The four known score-weight test failures remain outside this correction.
+
+## Shipment decision correction — done
+
+- Scenario and observed outputs share decide_action; suggestions render the same action/reason. Scores remain informational. Holds from point 1 still override all actions.
+- Added optional counter mappings, handling context and alternative suitability/ETA to RouteEvidence; monitor is an additive action. All CLI callers and relevant tests updated.
+- Weather is scored only for confirmed exposed handling; traffic detection filters exact site/direction/lane mappings before selecting the newest observation and baseline. No mapping means unknown.
+- Alternative must be suitable for the material, earlier than the original ETA and on time; restricted routes without verified alternatives produce Monitor. Buffer/Expedite require ETA/need-by; Normal requires package, route and handling evidence.
+- Added CLI flags for these inputs and labeled alternate suitability as operator/scenario evidence. Updated README and risk docs; schema.sql unchanged.
+- Nine new shipment-policy tests pass. All 54 tests run: 50 pass, with the same four pre-existing score-weight failures remaining for point 6.

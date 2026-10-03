@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from math import exp, isfinite, log
 
 from .config import DEFAULT_MAX_TEMPERATURE_C, DEFAULT_MIN_TEMPERATURE_C, DEFAULT_SENSOR_MAX_GAP
@@ -23,10 +23,10 @@ def _positive_linear_area(a: float, b: float, duration: float) -> float:
 
 def _positive_duration(a: float, b: float, duration: float) -> float:
     """Duration for which linear interpolation between a and b is positive."""
-    if a >= 0 and b >= 0:
-        return duration
     if a <= 0 and b <= 0:
         return 0.0
+    if a >= 0 and b >= 0:
+        return duration
     fraction = abs(a) / (abs(a) + abs(b))
     return duration * (1 - fraction if b > 0 else fraction)
 
@@ -36,8 +36,23 @@ def analyze_temperature_series(
     minimum_c: float = DEFAULT_MIN_TEMPERATURE_C,
     maximum_c: float = DEFAULT_MAX_TEMPERATURE_C,
     max_gap: timedelta = DEFAULT_SENSOR_MAX_GAP,
+    *,
+    evaluated_at: datetime | None = None,
+    monitoring_started_at: datetime | None = None,
 ) -> ExposureMetrics:
-    """Compute boundary-crossing minutes and degree-hours by linear interpolation."""
+    """Analyze a monitored interval, requiring its start and fresh sensor history.
+
+    Readings must belong to [monitoring_started_at, evaluated_at]. The last
+    reading may lag evaluation by max_gap, but no exposure is extrapolated.
+    Omitted monitoring start, fewer than two readings, or missing coverage
+    requires review. Simulations/replays must supply their evaluation time.
+    """
+    evaluated_at = evaluated_at if evaluated_at is not None else datetime.now(timezone.utc)
+    for timestamp in (evaluated_at, monitoring_started_at):
+        if timestamp is not None and (timestamp.tzinfo is None or timestamp.utcoffset() is None):
+            raise ValueError("monitoring timestamps must include a timezone")
+    if monitoring_started_at is not None and monitoring_started_at >= evaluated_at:
+        raise ValueError("monitoring start must precede evaluation")
     if not isfinite(minimum_c) or not isfinite(maximum_c) or minimum_c >= maximum_c:
         raise ValueError("temperature limits must be finite and minimum below maximum")
     if max_gap.total_seconds() <= 0:
@@ -55,11 +70,26 @@ def analyze_temperature_series(
             raise ValueError("reading timestamps must include a timezone")
     if any(a.observed_at == b.observed_at for a, b in zip(ordered, ordered[1:])):
         raise ValueError("reading timestamps must be unique")
+    if ordered[-1].observed_at > evaluated_at:
+        raise ValueError("readings cannot be later than evaluation")
+    if monitoring_started_at is not None and ordered[0].observed_at < monitoring_started_at:
+        raise ValueError("readings must belong to the requested monitoring interval")
+
+    history_evidence = []
+    if len(ordered) < 2:
+        history_evidence.append("A single package reading cannot establish a temperature history.")
+    if monitoring_started_at is None:
+        history_evidence.append("Monitoring start is unknown; transport-period coverage cannot be verified.")
+    elif ordered[0].observed_at > monitoring_started_at:
+        history_evidence.append("Package readings do not cover the beginning of the monitoring interval.")
+    if evaluated_at - ordered[-1].observed_at > max_gap:
+        history_evidence.append("The last package reading is too old at evaluation; the end of the interval is unmonitored.")
 
     hot_minutes = cold_minutes = hot_dh = cold_dh = peak_hot = peak_cold = 0.0
     borderline = 0
     accuracy_unknown = False
-    incomplete = False
+    incomplete = bool(history_evidence)
+    sensor_gap = False
     out_of_range = False
     for reading in ordered:
         if reading.accuracy_c is None:
@@ -80,6 +110,7 @@ def analyze_temperature_series(
             raise ValueError("reading timestamps must be strictly increasing")
         if elapsed > max_gap.total_seconds():
             incomplete = True
+            sensor_gap = True
             continue  # Do not invent an exposure curve across an unobserved gap.
         minutes = elapsed / 60
         x0, x1 = first.temperature_c, second.temperature_c
@@ -88,14 +119,14 @@ def analyze_temperature_series(
         hot_dh += _positive_linear_area(x0 - maximum_c, x1 - maximum_c, minutes) / 60
         cold_dh += _positive_linear_area(minimum_c - x0, minimum_c - x1, minutes) / 60
     review = out_of_range or borderline > 0 or incomplete or accuracy_unknown
-    evidence = []
+    evidence = list(history_evidence)
     if out_of_range:
         evidence.append("A nominal package reading is outside the configured temperature band.")
     if borderline:
         evidence.append("Measurement uncertainty touches a temperature limit; verify sensor accuracy.")
     if accuracy_unknown:
         evidence.append("Sensor accuracy is not recorded; quality review is required.")
-    if incomplete:
+    if sensor_gap:
         evidence.append("One or more sensor gaps exceed the configured maximum gap; exposure is incomplete.")
     return ExposureMetrics(hot_minutes, cold_minutes, peak_hot, peak_cold,
                            hot_dh, cold_dh, borderline, incomplete, review, tuple(evidence), accuracy_unknown)

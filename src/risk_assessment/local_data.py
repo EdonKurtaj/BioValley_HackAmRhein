@@ -6,10 +6,39 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
-from .config import LOCAL_WEATHER_FRESHNESS_MINUTES, TRAFFIC_FRESHNESS_MINUTES
+from .config import LOCAL_WEATHER_FRESHNESS_MINUTES, PORT_GAUGE_FRESHNESS_MINUTES, TRAFFIC_FRESHNESS_MINUTES
 
 DEFAULT_DATA_DIR = Path(__file__).resolve().parents[2] / "pythontest" / "data"
+
+
+def _port_observation_time(value: object) -> datetime | None:
+    """Read aware ISO times or the Port page's Europe/Zurich local timestamp.
+
+    Ambiguous or nonexistent daylight-saving wall times remain unknown.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return None
+    value = value.strip()
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        try:
+            parsed = datetime.strptime(value, "%d.%m.%Y %H:%M")
+        except ValueError:
+            return None
+        zone = ZoneInfo("Europe/Zurich")
+        candidates = set()
+        for fold in (0, 1):
+            local = parsed.replace(tzinfo=zone, fold=fold)
+            utc = local.astimezone(timezone.utc)
+            if utc.astimezone(zone).replace(tzinfo=None) == parsed:
+                candidates.add(utc)
+        return next(iter(candidates)) if len(candidates) == 1 else None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed.astimezone(timezone.utc)
 
 
 def _age_minutes(timestamp: str | None) -> float | None:
@@ -88,7 +117,19 @@ def collect_local_context(data_dir: Path = DEFAULT_DATA_DIR) -> dict[str, Any]:
         None,
     )
     port_page_checked = (port or {}).get("current_page_checked_at")
-    port_age = _age_minutes(port_page_checked)
+    port_snapshot_age = _age_minutes(port_page_checked)
+    port_observed = _port_observation_time((port_current or {}).get("observed_at"))
+    port_age = None
+    port_status = "unknown"
+    port_reason = "Port gauge measurement time is missing, invalid, or ambiguous; current freshness is unknown."
+    if port_observed is not None:
+        elapsed = (datetime.now(timezone.utc) - port_observed).total_seconds() / 60
+        if elapsed < 0:
+            port_reason = "Port gauge measurement time is in the future; current freshness is unknown."
+        else:
+            port_age = elapsed
+            port_status = "observed snapshot" if port_age <= PORT_GAUGE_FRESHNESS_MINUTES else "stale"
+            port_reason = f"Port gauge measurement is {port_age:.1f} min old (demo limit {PORT_GAUGE_FRESHNESS_MINUTES:g} min)."
     thresholds = {item.get("mark"): item for item in port_data.get("flood_thresholds", [])}
     return {
         "weather": weather,
@@ -97,9 +138,12 @@ def collect_local_context(data_dir: Path = DEFAULT_DATA_DIR) -> dict[str, Any]:
             "basel_stadt_latest": latest_rhine,
             "basel_stadt_observation_age_minutes": basel_stadt_age,
             "port_basel_rheinhalle": port_current,
-            "port_snapshot_age_minutes": port_age,
+            "port_snapshot_age_minutes": port_snapshot_age,
+            "port_observation_age_minutes": port_age,
+            "port_observed_at_utc": port_observed.isoformat() if port_observed is not None else None,
+            "port_freshness_reason": port_reason,
             "port_thresholds": thresholds,
             "interpretation": "Separate gauges; apply restrictions only to a matching ship-leg segment.",
-            "source_status": "observed snapshot" if port_age is not None and port_age <= LOCAL_WEATHER_FRESHNESS_MINUTES else "stale",
+            "source_status": port_status,
         },
     }

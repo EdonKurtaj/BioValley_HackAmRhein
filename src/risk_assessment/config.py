@@ -8,6 +8,7 @@ DEFAULT_MAX_TEMPERATURE_C = 8.0
 
 # Demo data-freshness window, not a source guarantee or operational SLA.
 LOCAL_WEATHER_FRESHNESS_MINUTES = 30.0
+PORT_GAUGE_FRESHNESS_MINUTES = 30.0  # Demo measurement-age limit, not a source SLA.
 # Demo freshness allowance for hourly counts; confirm against source update cadence.
 TRAFFIC_FRESHNESS_MINUTES = 120.0
 

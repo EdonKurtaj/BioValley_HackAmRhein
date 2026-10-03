@@ -9,14 +9,25 @@ from datetime import datetime, timedelta, timezone
 from math import isfinite
 from pathlib import Path
 
-from .decision import decide_action, parse_time, suggest_system_action
+from .decision import decide_action, parse_time, suggestion_from_assessment
 from .disturbance import detect_open_data_disturbances
-from .interfaces import RouteEvidence
+from .interfaces import RouteEvidence, TrafficCounterMatch
 from .logistics import TrafficAnomaly, classify_rhine_high_water, traffic_volume_anomaly
 from .local_data import DEFAULT_DATA_DIR, collect_local_context, read_snapshot
 from .observed import assess_observed_data, render_observed_summary
 from .priority import calculate_priority_score
 from .thermal import analyze_temperature_series, simulate_package_temperature, time_to_temperature_limit
+
+
+def parse_traffic_counters(values: list[str]) -> tuple[TrafficCounterMatch, ...]:
+    """Parse explicitly configured route-counter mappings."""
+    matches = []
+    for value in values:
+        parts = value.split("|")
+        if len(parts) != 3 or not parts[0].strip() or not parts[1].strip():
+            raise ValueError("traffic counter must be SITE|DIRECTION|LANE")
+        matches.append(TrafficCounterMatch(parts[0].strip(), parts[1].strip(), int(parts[2])))
+    return tuple(matches)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -35,6 +46,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--eta-at", help="Estimated receipt time, ISO-8601 with timezone")
     parser.add_argument("--needed-at", help="Material need-by time, ISO-8601 with timezone")
     parser.add_argument("--alternate-route-available", action="store_true")
+    parser.add_argument("--route-status", choices=("clear", "disrupted", "unknown"),
+                        help="Explicit shipment-route status; absence remains unknown")
+    parser.add_argument("--alternate-route-suitable", action="store_true", help="Alternative verified for refrigerated material handling")
+    parser.add_argument("--alternate-eta-at", help="Alternative arrival, ISO-8601 with timezone")
+    handling = parser.add_mutually_exclusive_group()
+    handling.add_argument("--exposed-handling", dest="exposed_handling", action="store_const", const=True)
+    handling.add_argument("--controlled-handling", dest="exposed_handling", action="store_const", const=False)
+    parser.add_argument("--traffic-counter", action="append", default=[], metavar="SITE|DIRECTION|LANE",
+                        help="Route-matched counter; repeat for multiple lanes")
     parser.add_argument("--rhine-route-segment", choices=("basel_mittlere_bruecke_birsfelden", "rheinfelden_kembs"))
     parser.add_argument("--port-water-level-cm", type=float)
     parser.add_argument("--traffic-count", type=float)
@@ -57,7 +77,11 @@ def run(args: argparse.Namespace) -> dict:
     duration = timedelta(minutes=args.duration_minutes)
     tau = timedelta(minutes=args.tau_minutes)
     readings = [] if args.scenario == "stale" else simulate_package_temperature(args.start_c, ambient, duration, tau)
-    thermal = analyze_temperature_series(readings)
+    thermal = analyze_temperature_series(
+        readings,
+        monitoring_started_at=readings[0].observed_at if readings else None,
+        evaluated_at=readings[-1].observed_at if readings else None,
+    )
     route_evidence = []
     restricted = False
     disruption: bool | None = None
@@ -100,6 +124,11 @@ def run(args: argparse.Namespace) -> dict:
         restricted = rhine_status.status == "restricted"
         disruption = restricted
         args.alternate_route_available = True
+        args.alternate_route_suitable = True
+        now = datetime.now(timezone.utc)
+        args.eta_at = args.eta_at or (now + timedelta(hours=2)).isoformat()
+        args.needed_at = args.needed_at or (now + timedelta(hours=8)).isoformat()
+        args.alternate_eta_at = (parse_time(args.eta_at) - timedelta(minutes=30)).isoformat()
         route_evidence.append("SIMULATED: high-water level and matching ship leg; not the live gauge value.")
         route_evidence.append(rhine_status.reason)
     if args.scenario == "traffic":
@@ -120,15 +149,22 @@ def run(args: argparse.Namespace) -> dict:
     if args.scenario == "stale":
         thermal = analyze_temperature_series([])
         route_evidence.append("Sensor history intentionally missing in this scenario.")
+    if args.route_status is not None:
+        disruption = {"clear": False, "disrupted": True, "unknown": None}[args.route_status]
     route = RouteEvidence(disruption_observed=disruption, route_restricted=restricted,
                           alternate_route_available=args.alternate_route_available,
                           traffic_anomaly=traffic_result.robust_z if traffic_result else None,
                           estimated_arrival_at=parse_time(args.eta_at),
                           material_needed_at=parse_time(args.needed_at),
-                          buffer_hours=args.buffer_hours, evidence=tuple(route_evidence))
+                          buffer_hours=args.buffer_hours, evidence=tuple(route_evidence),
+                          exposed_handling=args.exposed_handling,
+                          traffic_route_matched=bool(args.traffic_counter),
+                          traffic_counters=parse_traffic_counters(args.traffic_counter),
+                          alternate_route_suitable=args.alternate_route_suitable,
+                          alternate_arrival_at=parse_time(args.alternate_eta_at))
     assessment = decide_action(thermal, route)
     priority = calculate_priority_score(thermal, route)
-    suggestion = suggest_system_action(thermal, route, priority)
+    suggestion = suggestion_from_assessment(assessment)
     upper = time_to_temperature_limit(args.start_c, ambient, 8.0, tau)
     lower = time_to_temperature_limit(args.start_c, ambient, 2.0, tau)
     return {
@@ -139,12 +175,13 @@ def run(args: argparse.Namespace) -> dict:
                             "duration_minutes": args.duration_minutes, "time_constant_minutes": args.tau_minutes,
                             "temperature_limits_c": [2, 8],
                             "ambient_source": "MeteoSwiss observation" if args.ambient_c is None and observed_air_c is not None
-                            and args.scenario not in ("hot", "cold", "stale") else "illustrative scenario assumption"},
+                            and args.scenario in ("observed-weather", "combined") else "illustrative scenario assumption"},
         "package_temperature": {"samples": len(readings), "final_temperature_c": readings[-1].temperature_c if readings else None,
                                 "minutes_above_8": thermal.minutes_above_max, "minutes_below_2": thermal.minutes_below_min,
                                 "peak_above_8_c": thermal.peak_above_max_c, "peak_below_2_c": thermal.peak_below_min_c,
                                 "hot_degree_hours": thermal.hot_degree_hours, "cold_degree_hours": thermal.cold_degree_hours,
                                 "sensor_accuracy_unknown": thermal.sensor_accuracy_unknown,
+                                "incomplete_history": thermal.incomplete_history,
                                 "quality_review_required": thermal.quality_review_required,
                                 "evidence": list(thermal.evidence),
                                 "time_to_8_minutes_at_constant_ambient": upper,
@@ -185,6 +222,7 @@ def run_demo_suite_data(args: argparse.Namespace) -> dict:
         case.start_c = 7.0 if scenario == "combined" else 5.0
         case.ambient_c = None if scenario == "combined" else 5.0
         case.duration_minutes = 30.0 if scenario == "combined" else 10.0
+        case.exposed_handling = scenario == "combined"
         case.eta_at = eta.isoformat() if eta else None
         case.needed_at = need_by.isoformat() if need_by else None
         outcome = run(case)
@@ -330,10 +368,15 @@ def main() -> int:
 def run_observed(args: argparse.Namespace) -> dict:
     """Score currently saved public observations and optional caller ETA/route metadata."""
     route = RouteEvidence(
+        disruption_observed={"clear": False, "disrupted": True, "unknown": None}.get(args.route_status),
         alternate_route_available=args.alternate_route_available,
         estimated_arrival_at=parse_time(args.eta_at),
         material_needed_at=parse_time(args.needed_at),
         buffer_hours=args.buffer_hours,
+        exposed_handling=args.exposed_handling,
+        traffic_counters=parse_traffic_counters(args.traffic_counter),
+        alternate_route_suitable=args.alternate_route_suitable,
+        alternate_arrival_at=parse_time(args.alternate_eta_at),
     )
     return assess_observed_data(args.data_dir, route, args.rhine_route_segment)
 

@@ -63,7 +63,7 @@ def calculate_priority_score(
         route_signals.append(100.0 if route.disruption_observed else 0.0)
     if route.route_restricted:
         route_signals.append(100.0)
-    if route.traffic_anomaly is not None:
+    if route.traffic_route_matched and route.traffic_anomaly is not None:
         if not isfinite(route.traffic_anomaly):
             raise ValueError("traffic anomaly must be finite")
         # Counts indicate unusual volume only; this subscore is not a delay estimate.
