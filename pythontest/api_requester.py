@@ -368,7 +368,7 @@ def check_meteoswiss_current(source: dict) -> dict:
         result["saved"] = False
         result["save_error"] = str(exc)
     if rate_limited:
-        status_line = f"FAILED — rate limited (HTTP 429; Retry-After: {retry_after or 'not provided'})"
+        status_line = f"FAILED — rate limited (HTTP 429; Retry-After: {result['retry_after'] or 'not provided'})"
     elif not result["saved"]:
         status_line = "FAILED — could not save response"
     elif result["request_ok"]:
@@ -388,7 +388,17 @@ def run_cycle() -> list[dict]:
         time.sleep(0.5)
     try:
         from transform_port_pegel import save, transform
+    except ModuleNotFoundError as exc:
+        if exc.name != "transform_port_pegel":
+            raise
+        print(
+            "Clean port data: SKIPPED — transform_port_pegel.py is missing; "
+            "source responses remain saved in data/.",
+            flush=True,
+        )
+        return results
 
+    try:
         clean_data = transform()
         saved_path = save(clean_data)
         print(f"Clean port data saved: {saved_path.relative_to(ROOT)}", flush=True)
