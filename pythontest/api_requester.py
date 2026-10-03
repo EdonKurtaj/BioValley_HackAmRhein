@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
 TIMEOUT_SECONDS = 30
 RHINE_RECORD_LIMIT = 48
+RAW_KEEP = 50
 
 SOURCES = [
     {
@@ -169,9 +170,20 @@ def parse_payload(source: dict, body: bytes | None) -> tuple[object, str | None]
         return {"body_text": text}, f"HTML extraction failed: {exc}"
 
 
+def prune_raw_files(raw_dir: Path, latest_raw_path: Path) -> None:
+    files = sorted((path for path in raw_dir.glob("*.html") if path.is_file()), key=lambda path: path.name, reverse=True)
+    # Reserve a slot for latest.json even if the system clock moved backwards.
+    keep = {latest_raw_path}
+    keep.update([path for path in files if path != latest_raw_path][:RAW_KEEP - 1])
+    for path in files:
+        if path not in keep:
+            path.unlink()
+
+
 def save_result(source: dict, result: dict, body: bytes | None) -> None:
     folder = DATA_DIR / source["id"]
     folder.mkdir(parents=True, exist_ok=True)
+    raw_path = None
     if result["request_ok"]:
         if body is not None and source["kind"] == "html":
             raw_dir = folder / "raw"
@@ -185,6 +197,8 @@ def save_result(source: dict, result: dict, body: bytes | None) -> None:
     result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     with (folder / "history.jsonl").open("a", encoding="utf-8") as history:
         history.write(json.dumps(result, ensure_ascii=False, separators=(",", ":")) + "\n")
+    if raw_path is not None:
+        prune_raw_files(raw_path.parent, raw_path)
 
 
 def check_source(source: dict) -> dict:

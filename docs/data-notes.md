@@ -28,3 +28,11 @@ The traffic request remains unchanged at `limit=10`, ordered by `-datetimefrom`.
 The requester continues to read the current-values CSV directly. The old STAC station-fetch function, parameter-metadata loader, and metadata URL constant were removed after a repository search found no external callers. `parse_csv_value`, `csv`, `io`, `ZoneInfo`, and `re` remain in use.
 
 The live `--once` run completed with HTTP 200 for all five sources and successful port transformation. MeteoSwiss still prints temperature, the observation time in Europe/Zurich, and measurement age in the same format; an offline test checks the exact status line with a fixed clock.
+
+## Port number formats
+
+On 2026-10-03, searching the saved HTML pages for digit-apostrophe-digit patterns found no straight or curly thousands separators. The previous parser did not handle those formats reliably, so support was added as a preventive fix.
+
+`parse_swiss_number` accepts straight and curly apostrophes, narrow/thin/non-breaking grouping spaces, comma decimals, decimal points, and signed values. HTML extraction normalizes grouping whitespace to regular spaces, which are also supported. Measurement parsing separates an optional `ca.` prefix and the unit before converting the number.
+
+Integral numeric values return `int`; fractional values return `float`. Forecast fields retain their existing float representation for output compatibility. Transformation of the saved example pages was compared before and after the change: the serialized output is identical, excluding the generated `updated_at` timestamp.

@@ -15,7 +15,7 @@ Each source has a local folder under `pythontest/data/`:
 - `latest.json` contains the last successful response. Failed requests leave it unchanged; `checked_at` is the time of that successful fetch.
 - `last_error.json` contains the most recent failed request, including its status, error, and fetch time. It remains after recovery as an error record.
 - `history.jsonl` records every fetch attempt, successful or failed, when storage is writable.
-- `raw/` stores HTML from successful requests only. Failed requests leave these files unchanged.
+- `raw/` stores HTML from successful requests only. After a successful save, `RAW_KEEP = 50` limits each source to 50 HTML files, ordered by timestamp filename. The file referenced by `latest.json` is always retained, including when the clock moves backwards. Failed requests leave these files unchanged. Cleanup runs after the latest snapshot and history have been written successfully.
 
 The port transformer reads the last successful HTML. Its `current_page_checked_at` and `forecast_page_checked_at` retain the original fetch times, so consumers can identify stale data. If a source has never succeeded, no `latest.json` is created.
 
@@ -26,4 +26,5 @@ Run the offline archive regression checks:
 ```sh
 python3 -m unittest discover -s pythontest -p 'test_api*.py' -v
 python3 -m unittest discover -s pythontest -p test_transform_port_pegel.py -v
+python3 -m unittest discover -s pythontest -p test_parse_swiss_number.py -v
 ```
