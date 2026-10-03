@@ -22,6 +22,14 @@ The collector keeps local archives and also stores measurements in Supabase when
 python3 pythontest/api_requester.py --once
 ```
 
+The regular collector also fetches OpenTransportData road situations and Basel-area counter readings. It saves a combined source snapshot and counter-minute history alongside the existing per-source archives. For minute-by-minute traffic polling by itself, run:
+
+```sh
+python3 pythontest/opentransportdata.py --watch
+```
+
+Both paths use `OTD_TRAFFIC_SITUATIONS_API_KEY` and `OTD_TRAFFIC_COUNTERS_API_KEY` from the local `.env`. See [source notes](docs/SOURCES.md) for the geographic filter and its limits.
+
 By default, the CLI prints a readable summary with the risk score and data coverage. Add `--output-format json` for the full structured observations and score components. Run a package-temperature scenario explicitly with:
 
 ```sh

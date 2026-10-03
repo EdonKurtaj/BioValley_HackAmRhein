@@ -54,6 +54,12 @@ SOURCES = [
         "basel_auth": True,
     },
     {
+        "id": "opentransportdata_basel_region",
+        "name": "OpenTransportData Basel-region road traffic",
+        "url": "https://api.opentransportdata.swiss/TDP/Soap_Datex2/TrafficSituations/Pull",
+        "kind": "opentransportdata",
+    },
+    {
         "id": "port_pegel_current",
         "name": "Port of Switzerland water levels",
         "url": "https://port-of-switzerland.ch/hafenservice/pegel/",
@@ -208,6 +214,8 @@ def save_result(source: dict, result: dict, body: bytes | None) -> None:
 def check_source(source: dict) -> dict:
     if source["kind"] == "meteo_current":
         return check_meteoswiss_current(source)
+    if source["kind"] == "opentransportdata":
+        return check_opentransportdata(source)
     checked_at = now_utc()
     status, headers, body, transport_error = read_response(source)
     payload, parse_error = parse_payload(source, body)
@@ -257,6 +265,55 @@ def check_source(source: dict) -> dict:
     else:
         outcome = "FAILED — connection error"
     print(f"{label}: {outcome}", flush=True)
+    return result
+
+
+def check_opentransportdata(source: dict) -> dict:
+    """Collect and archive the OTD situation and counter feeds as one source."""
+    checked_at = now_utc()
+    data = None
+    error = None
+    try:
+        import opentransportdata
+
+        data = opentransportdata.fetch_all()
+        if data["errors"]:
+            error = "; ".join(data["errors"])
+        # Preserve the dedicated per-minute counter archive as well as this
+        # collector's normal per-source attempt history.
+        opentransportdata.save_snapshot(data)
+    except (OSError, RuntimeError, ValueError) as exc:
+        error = f"{type(exc).__name__}: {exc}"
+
+    status_codes = re.findall(r"\bHTTP (\d{3})\b", error or "")
+    http_status = int(status_codes[-1]) if status_codes else (200 if data is not None and not error else None)
+    ok = data is not None and not error
+    result = {
+        "source_id": source["id"], "name": source["name"], "url": source["url"],
+        "checked_at": checked_at, "http_status": http_status,
+        "request_ok": ok, "rate_limited": http_status == 429, "retry_after": None,
+        "response_bytes": None, "error": error, "saved": True,
+        "latest_file": str((DATA_DIR / source["id"] / "latest.json").relative_to(ROOT)),
+        "history_file": str((DATA_DIR / source["id"] / "history.jsonl").relative_to(ROOT)),
+        "data": data,
+    }
+    try:
+        save_result(source, result, None)
+    except OSError as exc:
+        result["saved"] = False
+        result["save_error"] = str(exc)
+
+    counts = data or {}
+    counter_data = counts.get("traffic_counters", {})
+    if not result["saved"]:
+        status = "FAILED — could not save response"
+    elif ok:
+        status = (f"OK — {len(counts.get('traffic_situations', []))} situations, "
+                  f"{len(counter_data.get('sites', []))} counter sites, "
+                  f"{len(counter_data.get('current_readings', []))} current readings")
+    else:
+        status = f"FAILED — {error or 'request failed'}"
+    print(f"{source['name']}: {status}", flush=True)
     return result
 
 

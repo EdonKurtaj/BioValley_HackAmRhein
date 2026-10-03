@@ -1,18 +1,19 @@
 # Basel supply-risk database
 
-The collector writes to the existing `data_sources`, `fetch_runs`, and `observations` tables defined in [`schema.sql`](schema.sql). These tables must already exist in Supabase. HTTP 404/PGRST205 means the table is absent from the exposed schema; the collector cannot create tables through the data REST API. The schema file is unchanged by this integration.
+The collector writes to the existing `data_sources`, `fetch_runs`, and `observations` tables defined in [`schema.sql`](schema.sql). These tables must already exist in Supabase. HTTP 404/PGRST205 means the table is absent from the exposed schema; the collector cannot create tables through the data REST API. The OpenTransportData integration adds the `opentransportdata` source kind; apply [`20261003190000_allow_opentransportdata_source_kind.sql`](migrations/20261003190000_allow_opentransportdata_source_kind.sql) to an existing Supabase database before expecting its fetch log and observations to sync.
 
 Configure `SUPABASE_URL` and `SUPABASE_SECRET_KEY` in the project's local `.env`; see [the variable template](../.env.example). The collector supports current secret keys and legacy service-role JWTs and never prints credentials. Run it with the [requester commands](../pythontest/README.md). No additional package installation is required.
 
 ## What the requester fetches
 
-`pythontest/api_requester.py` makes five GET requests on each cycle:
+`pythontest/api_requester.py` checks six logical sources on each cycle. The OpenTransportData source can make separate HTTPS SOAP requests for traffic situations, counter-site metadata, and live readings:
 
 | Source ID | What is fetched | Best fit in this schema |
 | --- | --- | --- |
 | `meteoswiss_basel_temperature` | Nine current Basel/Binningen (BAS) weather metrics, observation time, station metadata, age at fetch, and parameter metadata | A fetch log plus one observation per available weather metric; units and aggregation windows come from [weather_parameters.py](../pythontest/weather_parameters.py) |
 | `basel_dataset_100006` | JSON records from Basel motor traffic API, limited to latest 10 records ordered by `datetimefrom` | Each count field is its own metric in vehicles; station, lane, direction, interval end and traffic type distinguish observation identities |
 | `basel_dataset_100089` | JSON records from Basel Rhine API; window documented in [data notes](../docs/data-notes.md) | `abfluss` in m3/s, `pegelhoehe` in cm, and `pegel` in m; observation time comes from `timestamp` |
+| `opentransportdata_basel_region` | Basel-area road situations and traffic counter site/current reading data | Counter flow and speed values become numeric observations; situations and full site/readings remain in the raw source payload |
 | `port_pegel_current` | Port page headings, tables and visible text; raw HTML is also saved locally | Gauge readings become `water_level` in the published units and Europe/Zurich observation time; flood thresholds remain in the raw payload |
 | `port_pegel_forecast` | Forecast page headings, tables and visible text; raw HTML is saved locally | `water_level_m_above_sea_level` in m and `discharge_m3_per_second` in m3/s; valid time is `observed_at`, with issue time and forecast flag in `dimensions` |
 
@@ -20,7 +21,7 @@ Every request also produces operational metadata: fetch time, HTTP status, succe
 
 ## Tables and flow
 
-1. `data_sources` catalogs the five inputs.
+1. `data_sources` catalogs the six inputs.
 2. `fetch_runs` records one attempted request and its untouched parsed response per source and cycle.
 3. `observations` stores one normalized metric per station/time, with a stable source-specific `observation_key` for idempotent upserts and `raw_record` for traceability.
 4. `materials`, `material_lots`, and `shipments` represent the at-risk inventory and replenishment context.

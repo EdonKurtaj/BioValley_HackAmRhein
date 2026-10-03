@@ -1,4 +1,4 @@
-"""Pure normalization of the five public source payloads into observation rows."""
+"""Pure normalization of public source payloads into observation rows."""
 
 import hashlib
 import json
@@ -103,6 +103,50 @@ def normalize_traffic(result: FetchResult) -> list[Observation]:
     return rows
 
 
+def normalize_opentransportdata(result: FetchResult) -> list[Observation]:
+    """Normalize numeric Basel-region OTD counter readings; events stay in raw payload."""
+    data = result["data"]
+    counters = data["traffic_counters"]
+    sites = {site.get("id"): site for site in counters["sites"] if site.get("id")}
+    rows = []
+    for reading in counters["current_readings"]:
+        timestamp = reading.get("observed_at")
+        if not timestamp:
+            continue
+        observed_at = utc_time(timestamp)
+        site_id = reading["site_id"]
+        site = sites.get(site_id, {})
+        for measured in reading["values"]:
+            meaning = measured.get("meaning")
+            if meaning.endswith("_flow_per_hour"):
+                metric, field_name, unit = meaning, "vehicleFlowRate", "vehicles/hour"
+            elif meaning.endswith("_average_speed_kmh"):
+                metric, field_name, unit = meaning, "speed", "km/h"
+            else:
+                continue
+            raw_value = measured.get("fields", {}).get(field_name)
+            try:
+                value = float(raw_value)
+            except (TypeError, ValueError):
+                continue
+            if not math.isfinite(value):
+                continue
+            if value.is_integer():
+                value = int(value)
+            dimensions = {
+                "measurement_index": measured.get("index"),
+                "coordinates": site.get("coordinates", []),
+                "lanes": site.get("lanes"),
+                "sample_count": measured.get("fields", {}).get("numberOfInputValuesUsed"),
+            }
+            row = observation(result, site_id, None, observed_at, metric, value, unit,
+                              {"reading": reading, "measurement": measured}, dimensions,
+                              measured.get("index"))
+            if row:
+                rows.append(row)
+    return rows
+
+
 def normalize_port_current(result: FetchResult) -> list[Observation]:
     readings, _ = parse_current(result["data"]["tables"])
     rows = []
@@ -147,6 +191,7 @@ NORMALIZERS = {
     "meteoswiss_basel_temperature": normalize_meteo,
     "basel_dataset_100089": normalize_rhine,
     "basel_dataset_100006": normalize_traffic,
+    "opentransportdata_basel_region": normalize_opentransportdata,
     "port_pegel_current": normalize_port_current,
     "port_pegel_forecast": normalize_port_forecast,
 }
