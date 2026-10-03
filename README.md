@@ -1,8 +1,8 @@
-# Project name
+# Basel cold-chain risk prototype
 
 > Built at [HackAmRhein 2026](https://hackamrhein.dev) with Codex. First time in this repository? The setup guide is [HACKAMRHEIN.md](HACKAMRHEIN.md).
 
-One or two sentences: what this prototype does and for whom.
+This prototype explores how weather, traffic, and Rhine signals can inform cold-chain logistics planning for a generic refrigerated material. Package-temperature scenarios and observed local conditions are separate evidence.
 
 ## The problem
 
@@ -10,7 +10,19 @@ Who has it, and what they do today.
 
 ## How to run it
 
-Filled in by the first build task, with the exact commands, tested on a fresh copy.
+From the repository root, run a deterministic hot-exposure scenario using locally saved observations as context:
+
+```sh
+PYTHONPATH=src python3 -m risk_assessment.cli --scenario hot --start-c 7 --duration-minutes 60 --tau-minutes 90
+```
+
+Choose `--scenario cold` for a cold exposure, or use `--scenario observed-weather` to use a MeteoSwiss air-temperature observation as ambient context when the saved snapshot is no more than 30 minutes old. A stale or missing snapshot falls back to an explicitly illustrative 20 °C. Set `--ambient-c` to override the scenario ambient temperature. The package time constant is an illustrative input, not a qualified packaging property.
+
+Run the calculation checks with:
+
+```sh
+PYTHONPATH=src python3 -m unittest discover -s tests -v
+```
 
 ## Data sources
 
@@ -18,7 +30,7 @@ See [docs/SOURCES.md](docs/SOURCES.md).
 
 ## Limits
 
-What is simulated, synthetic or untested, and what this must not be used for yet.
+Scenario package temperatures are simulated. Saved local weather is a regional observation, not a box sensor; the current ten-record traffic sample is not a route baseline; and river restrictions require a matching ship-leg section. The model has no product-specific stability rules and cannot decide whether goods are safe or damaged. It is a planning demo, not an operational or quality-release system.
 
 ## Team
 

@@ -22,7 +22,7 @@ Every request also produces operational metadata: fetch time, HTTP status, succe
 2. `fetch_runs` records one attempted request and its untouched parsed response per source and cycle.
 3. `observations` stores one normalized metric per station/time, with a stable source-specific `observation_key` for idempotent upserts and `raw_record` for traceability.
 4. `materials`, `material_lots`, and `shipments` represent the at-risk inventory and replenishment context.
-5. `manufacturing_decisions` stores the action (`normal`, `buffer`, `expedite`, `reroute`, or `quarantine`), 0–100 risk score, explanation, validity, and evidence references. This keeps decisions reviewable and lets a dashboard query the latest decision per material.
+5. `manufacturing_decisions` stores the action (`normal`, `buffer`, `expedite`, `reroute`, or `quality_review`), explanation, validity, and evidence references. It deliberately stores no unvalidated 0–100 risk score.
 
 The challenge assumes 2–8 °C handling for its example material, so these are demo defaults on `materials` and `material_lots`. WHO TRS 961 Annex 9 supports tracking, receipt checks, transport monitoring, and quarantine of suspect products; this prototype schema records those decisions but does not implement a regulated quality system or determine product disposition.
 
@@ -34,4 +34,4 @@ The API requester does not show the expanded Basel field definitions in its sour
 
 ## Access
 
-Row-level security is enabled. Anonymous and signed-in clients can read the public dataset snapshots and demo factory scenario for the dashboard. No client policy allows writes, updates, or deletes. Keep ingest and decision writes in trusted server-side code using `SUPABASE_SECRET_KEY`; restrict access to that secret.
+Row-level security is enabled. Anonymous and signed-in clients can read the public data-source catalog and open-data observations. Materials, lots, shipments, and decisions have no client read policy or grant; keep them server-side until a tenant-aware authenticated access design is implemented. Ingest and decision writes belong in trusted server-side code using `SUPABASE_SECRET_KEY`; never place that key in browser code or commit it.

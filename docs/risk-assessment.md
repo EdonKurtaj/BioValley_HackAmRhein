@@ -20,6 +20,8 @@ The saved requester samples are snapshots, not a representative historical basel
 
 ## Calculation
 
+The local Python engine is in `src/risk_assessment/`. It reads the requester's saved `latest.json` snapshots under `pythontest/data/`; absent, failed, or stale feeds remain unknown/context. It does not write to Supabase. For a first calculation, run `PYTHONPATH=src python3 -m risk_assessment.cli --scenario hot --start-c 7 --duration-minutes 60 --tau-minutes 90` from the repository root. The default hot/cold cases and route triggers are deterministic demo assumptions; `--ambient-c` can set a different scenario value. The engine reports action and evidence, not a probability or numeric risk score.
+
 ### 1. Package temperature: measured first, modelled only for scenarios
 
 When the simulated embedded sensor is available, use its readings as the primary thermal input. Store timestamp, measured temperature, sensor accuracy/quality, and missing-data flags. Calculate and report, separately for hot and cold excursions:
@@ -33,9 +35,9 @@ hot_degree_hours  = Σ max(T_box_i - 8 °C, 0) × Δt_hours
 cold_degree_hours = Σ max(2 °C - T_box_i, 0) × Δt_hours
 ```
 
-Use the time-weighted trapezoid between readings for degree-hours if the sensor interval is irregular. Report sensor resolution/accuracy and gaps alongside the result. A reading exactly at 2 or 8 °C is within the stated band; show measurement uncertainty near either boundary as “borderline / check sensor accuracy,” not as a proven excursion.
+Assume temperature changes linearly between adjacent readings only when the gap is at most the configured maximum (15 minutes by default); compute boundary-crossing minutes from the interpolated crossing time and degree-hours as the trapezoid/triangle area divided by 60. Do not interpolate across longer gaps; flag history incomplete and require review. Report sensor resolution/accuracy and gaps alongside the result. A reading exactly at 2 or 8 °C is within the stated band; show measurement uncertainty that reaches either boundary as “borderline / check sensor accuracy,” not as a proven excursion. Missing sensor accuracy is explicitly flagged for quality review.
 
-For a scenario before telemetry exists, use a first-order package thermal response as an *illustration*, not an excursion verdict:
+For a scenario before telemetry exists, use a first-order package thermal response as an *illustration*, not an excursion verdict. Choose explicit scenario values; do not randomly generate a value inside 2–8 °C and present it as a measurement. The demo uses repeatable 2, 5, and 7 °C starting cases:
 
 ```text
 T_box(t + Δt) = T_air + (T_box(t) - T_air) × exp(-Δt / τ)
@@ -94,7 +96,7 @@ Calculate remaining production slack from shipment tracking and the required man
 slack_hours = time_until_material_is_needed - estimated_time_until_controlled_receipt
 ```
 
-Use a demo configuration for the buffer threshold (for example, a few hours chosen for the storyboard); clearly label it as a scenario assumption until the factory supplies a real deadline and operating buffer. Base `Buffer`/`Expedite` primarily on route ETA/slack, and base `Reroute` on a known route restriction plus a feasible alternate route and ETA. Do not derive actual minutes of truck delay from counts alone.
+Use a demo configuration for the buffer threshold (for example, a few hours chosen for the storyboard); clearly label it as a scenario assumption until the factory supplies a real deadline and operating buffer. Base `Buffer`/`Expedite` primarily on route ETA/slack, and base `Reroute` on a known route restriction plus a feasible alternate route and ETA. Do not derive actual minutes of truck delay from counts alone. The local engine does not claim an ETA from present snapshots; caller-provided ETA, need-by time, or explicit disruption scenario is required for these actions.
 
 Recommended decision order:
 
@@ -104,7 +106,15 @@ Recommended decision order:
 4. **Buffer:** a disruption is plausible but there is enough slack; keep the material in controlled storage and avoid unnecessary handling.
 5. **Normal:** no relevant route trigger, package reading within range, telemetry current, and sufficient slack.
 
-Display thermal exposure, route status, slack, and chosen action as distinct, explainable fields. Avoid a single opaque 0–100 score. If the UI requires a headline level, use a deterministic status label and show which measurable condition triggered it. A future probabilistic score would require historical shipment outcomes and validation data that are not available now.
+Display thermal exposure, route status, slack, and chosen action as distinct, explainable fields. Do not use a 0–100 score. A future probabilistic score would require historical shipment outcomes and validation data that are not available now. “Normal” means no modeled intervention trigger; it is not product release or proof of safety.
+
+## Current local implementation boundaries
+
+- The collector's saved MeteoSwiss snapshot can supply ambient context only while its fetch is current (30-minute demo freshness window); the package response remains simulated unless a temperature series is explicitly supplied.
+- The saved traffic response is summarized, but the current ten-record sample has no multiweek, same-counter baseline. `traffic_volume_anomaly` returns unknown until like-for-like counts are supplied; an available anomaly is still not treated as congestion or delay.
+- The Rhine helper uses the Basel-Rheinhalle level and Port high-water marks only when the caller names a matching ship-leg section. The Basel-Stadt gauge is shown separately; it is not converted. No low-water threshold is inferred.
+- Route actions accept explicit evidence and ETA/slack inputs. Weather, rainfall, or river readings alone do not silently add score penalties.
+- Product/customer records must not be exposed through anonymous Supabase reads. The schema is adjusted to keep materials, lots, shipments and decisions service-side until a tenant-aware authenticated access design is agreed.
 
 ## Demo cases to prove the logic
 
