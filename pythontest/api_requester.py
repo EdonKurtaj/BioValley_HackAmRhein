@@ -7,6 +7,7 @@ import argparse
 import csv
 import io
 import json
+import math
 import os
 import re
 import sys
@@ -15,38 +16,24 @@ from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
+
+from interfaces import IngestionSink
+from weather_parameters import WEATHER_PARAMETERS
 
 
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
 TIMEOUT_SECONDS = 30
-
-METEO_RISK_PARAMETER_METADATA = {
-    "tre200s0": {
-        "name_de": "Lufttemperatur 2 m über Boden; Momentanwert",
-        "name_en": "Air temperature 2 m above ground; current value",
-        "unit": "°C",
-    },
-    "rre150z0": {
-        "name_de": "Niederschlag; Zehnminutensumme",
-        "name_en": "Precipitation; ten-minute total",
-        "unit": "mm",
-    },
-    "fu3010z0": {"name_en": "Wind speed; ten-minute mean", "unit": "km/h"},
-    "fu3010z1": {"name_en": "Gust peak; one-second maximum", "unit": "km/h"},
-    "gre000z0": {"name_en": "Global radiation; ten-minute mean", "unit": "W/m²"},
-    "ure200s0": {"name_en": "Relative air humidity 2 m above ground; current value", "unit": "%"},
-    "sre000z0": {"name_en": "Sunshine duration; ten-minute total", "unit": "min"},
-    "tde200s0": {"name_en": "Dew point 2 m above ground; current value", "unit": "°C"},
-    "dkl010z0": {"name_en": "Wind direction; ten-minute mean", "unit": "°"},
-}
+RHINE_RECORD_LIMIT = 48
+RAW_KEEP = 50
 
 SOURCES = [
     {
         "id": "meteoswiss_basel_temperature",
-        "name": "MeteoSwiss Basel/Binningen current weather",
+        "name": "MeteoSwiss Basel/Binningen temperature",
         "url": "https://data.geo.admin.ch/ch.meteoschweiz.messwerte-aktuell/VQHA80.csv",
         "kind": "meteo_current",
         "station_id": "BAS",
@@ -61,7 +48,8 @@ SOURCES = [
     {
         "id": "basel_dataset_100089",
         "name": "Basel-Stadt dataset 100089 records",
-        "url": "https://data.bs.ch/api/explore/v2.1/catalog/datasets/100089/records/?lang=en&limit=10&offset=0&order_by=-timestamp",
+        "url": "https://data.bs.ch/api/explore/v2.1/catalog/datasets/100089/records/",
+        "params": {"lang": "en", "limit": RHINE_RECORD_LIMIT, "offset": 0, "order_by": "-timestamp"},
         "kind": "json",
         "basel_auth": True,
     },
@@ -140,12 +128,20 @@ def clean_text(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
+def source_url(source: dict) -> str:
+    params = source.get("params")
+    if not params:
+        return source["url"]
+    separator = "&" if "?" in source["url"] else "?"
+    return source["url"] + separator + urlencode(params)
+
+
 def read_response(source: dict) -> tuple[int | None, dict, bytes | None, str | None]:
     headers = {"User-Agent": "api-requester/1.0 (local data monitoring)"}
     api_key = os.environ.get("API_KEY")
     if source.get("basel_auth") and api_key:
         headers["Authorization"] = f"Apikey {api_key}"
-    request = Request(source["url"], headers=headers, method="GET")
+    request = Request(source_url(source), headers=headers, method="GET")
     try:
         with urlopen(request, timeout=TIMEOUT_SECONDS) as response:
             return response.status, dict(response.headers.items()), response.read(), None
@@ -178,18 +174,35 @@ def parse_payload(source: dict, body: bytes | None) -> tuple[object, str | None]
         return {"body_text": text}, f"HTML extraction failed: {exc}"
 
 
+def prune_raw_files(raw_dir: Path, latest_raw_path: Path) -> None:
+    files = sorted((path for path in raw_dir.glob("*.html") if path.is_file()), key=lambda path: path.name, reverse=True)
+    # Reserve a slot for latest.json even if the system clock moved backwards.
+    keep = {latest_raw_path}
+    keep.update([path for path in files if path != latest_raw_path][:RAW_KEEP - 1])
+    for path in files:
+        if path not in keep:
+            path.unlink()
+
+
 def save_result(source: dict, result: dict, body: bytes | None) -> None:
     folder = DATA_DIR / source["id"]
     folder.mkdir(parents=True, exist_ok=True)
-    if body is not None and source["kind"] == "html":
-        raw_dir = folder / "raw"
-        raw_dir.mkdir(exist_ok=True)
-        raw_path = raw_dir / (result["checked_at"].replace(":", "-") + ".html")
-        raw_path.write_bytes(body)
-        result["data"]["raw_html_file"] = str(raw_path.relative_to(ROOT))
-    (folder / "latest.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    raw_path = None
+    if result["request_ok"]:
+        if body is not None and source["kind"] == "html":
+            raw_dir = folder / "raw"
+            raw_dir.mkdir(exist_ok=True)
+            raw_path = raw_dir / (result["checked_at"].replace(":", "-") + ".html")
+            raw_path.write_bytes(body)
+            result["data"]["raw_html_file"] = str(raw_path.relative_to(ROOT))
+        result_path = folder / "latest.json"
+    else:
+        result_path = folder / "last_error.json"
+    result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     with (folder / "history.jsonl").open("a", encoding="utf-8") as history:
         history.write(json.dumps(result, ensure_ascii=False, separators=(",", ":")) + "\n")
+    if raw_path is not None:
+        prune_raw_files(raw_path.parent, raw_path)
 
 
 def check_source(source: dict) -> dict:
@@ -203,13 +216,14 @@ def check_source(source: dict) -> dict:
     result = {
         "source_id": source["id"],
         "name": source["name"],
-        "url": source["url"],
+        "url": source_url(source),
         "checked_at": checked_at,
         "http_status": status,
         "request_ok": ok,
         "rate_limited": rate_limited,
         "retry_after": headers.get("Retry-After") or headers.get("retry-after"),
         "response_bytes": len(body) if body is not None else None,
+        "source_last_modified": headers.get("Last-Modified") or headers.get("last-modified"),
         "error": transport_error or parse_error,
         "data": payload,
     }
@@ -225,11 +239,12 @@ def check_source(source: dict) -> dict:
         result["save_error"] = save_error
         # If the first write succeeded but a later archive write failed, keep
         # the latest status honest whenever the filesystem still permits it.
-        try:
-            latest_path = DATA_DIR / source["id"] / "latest.json"
-            latest_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        except OSError:
-            pass
+        if result["request_ok"]:
+            try:
+                latest_path = DATA_DIR / source["id"] / "latest.json"
+                latest_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            except OSError:
+                pass
     label = source["name"]
     if rate_limited:
         outcome = f"FAILED — rate limited (HTTP 429; Retry-After: {result['retry_after'] or 'not provided'})"
@@ -245,86 +260,15 @@ def check_source(source: dict) -> dict:
     return result
 
 
-METEO_PARAMETER_URL = "https://data.geo.admin.ch/ch.meteoschweiz.ogd-smn/ogd-smn_meta_parameters.csv"
-
-
 def parse_csv_value(value: str) -> object:
     value = value.strip()
-    if value in ("", "-"):
+    if not value:
         return None
     try:
         number = float(value)
         return int(number) if number.is_integer() else number
     except ValueError:
         return value
-
-
-def fetch_station_current(station: dict) -> tuple[dict, bytes | None, str | None, int | None, str | None]:
-    asset = next(
-        (asset for key, asset in station.get("assets", {}).items() if key.endswith("_t_now.csv")),
-        None,
-    )
-    station_info = {
-        "station_id": station.get("id"),
-        "name": station.get("properties", {}).get("title"),
-        "coordinates_lon_lat": station.get("geometry", {}).get("coordinates"),
-    }
-    if not asset:
-        return station_info, None, "No ten-minute current-data CSV available", None, None
-    response = Request(asset["href"], headers={"User-Agent": "api-requester/1.0 (local data monitoring)"})
-    try:
-        with urlopen(response, timeout=TIMEOUT_SECONDS) as answer:
-            body = answer.read()
-            rows = list(csv.DictReader(io.StringIO(body.decode("utf-8-sig", errors="replace")), delimiter=";"))
-            if not rows:
-                raise ValueError("CSV has no measurement rows")
-            timestamp_column = "reference_timestamp"
-            def timestamp_key(row: dict) -> datetime:
-                return datetime.strptime(row[timestamp_column], "%d.%m.%Y %H:%M")
-            latest_row = max(rows, key=timestamp_key)
-            timestamp = latest_row.pop(timestamp_column, None)
-            abbreviation = latest_row.pop("station_abbr", None)
-            station_info["station_abbr"] = abbreviation
-            station_info["observed_at"] = timestamp
-            wanted = station.get("measurement_parameters")
-            station_info["measurements"] = {
-                key: parse_csv_value(value)
-                for key, value in latest_row.items()
-                if not wanted or key in wanted
-            }
-            station_info["measurement_count"] = sum(value is not None for value in station_info["measurements"].values())
-            return station_info, body, None, answer.status, answer.headers.get("Retry-After")
-    except HTTPError as exc:
-        return station_info, None, str(exc), exc.code, exc.headers.get("Retry-After")
-    except (URLError, TimeoutError, OSError, ValueError, KeyError) as exc:
-        return station_info, None, str(exc), None, None
-
-
-def load_meteo_parameter_metadata() -> dict:
-    """Cache the official parameter dictionary locally and map CSV codes to names/units."""
-    folder = DATA_DIR / "meteoswiss_basel_temperature"
-    cache_path = folder / "parameter_metadata.csv"
-    if not cache_path.exists():
-        request = Request(METEO_PARAMETER_URL, headers={"User-Agent": "api-requester/1.0 (local data monitoring)"})
-        with urlopen(request, timeout=TIMEOUT_SECONDS) as response:
-            cache_path.parent.mkdir(parents=True, exist_ok=True)
-            cache_path.write_bytes(response.read())
-    raw = cache_path.read_bytes()
-    try:
-        text = raw.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        text = raw.decode("cp1252")
-    rows = csv.DictReader(io.StringIO(text), delimiter=";")
-    return {
-        row["parameter_shortname"]: {
-            "name_de": row.get("parameter_description_de", ""),
-            "name_en": row.get("parameter_description_en", ""),
-            "unit": row.get("parameter_unit", ""),
-            "group": row.get("parameter_group_de", ""),
-        }
-        for row in rows
-        if row.get("parameter_shortname")
-    }
 
 
 def check_meteoswiss_current(source: dict) -> dict:
@@ -342,30 +286,21 @@ def check_meteoswiss_current(source: dict) -> dict:
                 raise ValueError(f"Station {source['station_id']} not present in current-values CSV")
             observed_utc = datetime.strptime(row["Date"].strip(), "%Y%m%d%H%M").replace(tzinfo=timezone.utc)
             observed_local = observed_utc.astimezone(ZoneInfo("Europe/Zurich"))
-            measurements = {
-                code: parse_csv_value(value or "")
-                for code, value in row.items()
-                if code not in ("Station/Location", "Date") and code is not None
-            }
-            temperature = measurements.get("tre200s0")
-            if not isinstance(temperature, (int, float)):
-                raise ValueError("Current temperature value tre200s0 is missing")
-            precipitation_total = measurements.get("rre150z0")
-            if precipitation_total is not None and not isinstance(precipitation_total, (int, float)):
-                raise ValueError("Current precipitation value rre150z0 is invalid")
+            measurements = {}
+            for metric in WEATHER_PARAMETERS:
+                value = parse_csv_value(row.get(metric, ""))
+                measurements[metric] = value if isinstance(value, (int, float)) and math.isfinite(value) else None
+            if not any(value is not None for value in measurements.values()):
+                raise ValueError("No valid current weather measurements for BAS")
             station.update({
                 "observed_at_utc": observed_utc.isoformat().replace("+00:00", "Z"),
                 "observed_at": observed_local.isoformat(timespec="minutes"),
                 "time_zone": "Europe/Zurich",
                 "age_minutes_at_fetch": round((datetime.now(timezone.utc) - observed_utc).total_seconds() / 60, 1),
                 "measurements": measurements,
-                "measurement_count": sum(isinstance(value, (int, float)) for value in measurements.values()),
+                "missing_measurements": [metric for metric, value in measurements.items() if value is None],
             })
-            parameter_metadata = {
-                code: METEO_RISK_PARAMETER_METADATA[code]
-                for code in measurements
-                if code in METEO_RISK_PARAMETER_METADATA
-            }
+            parameter_metadata = {metric: dict(metadata) for metric, metadata in WEATHER_PARAMETERS.items()}
         except (UnicodeError, csv.Error, KeyError, ValueError) as exc:
             error = f"Could not parse MeteoSwiss current-values CSV: {exc}"
     rate_limited = status == 429
@@ -402,59 +337,99 @@ def check_meteoswiss_current(source: dict) -> dict:
         status_line = "FAILED — could not save response"
     elif result["request_ok"]:
         temp = station["measurements"]["tre200s0"]
-        precipitation = station["measurements"].get("rre150z0")
-        precipitation_label = "unavailable" if precipitation is None else f"{precipitation} mm/10 min"
-        status_line = (
-            f"OK — HTTP {status} — {temp} °C, precipitation {precipitation_label} "
-            f"at {station['observed_at']} ({station['age_minutes_at_fetch']} min old; Europe/Zurich)"
-        )
+        if temp is not None:
+            status_line = f"OK — HTTP {status} — {temp} °C at {station['observed_at']} ({station['age_minutes_at_fetch']} min old; Europe/Zurich)"
+        else:
+            count = sum(value is not None for value in station["measurements"].values())
+            status_line = f"OK — HTTP {status} — {count} weather values at {station['observed_at']} (temperature unavailable; Europe/Zurich)"
     else:
         status_line = f"FAILED — HTTP {status or 'connection error'} — {error}"
     print(f"{source['name']}: {status_line}", flush=True)
     return result
 
 
-def run_cycle() -> list[dict]:
+def create_ingestor(local_only: bool = False) -> IngestionSink | None:
+    if local_only:
+        return None
+    from supabase_ingest import SupabaseIngestor, load_local_env
+
+    load_local_env()
+    ingestor = SupabaseIngestor.from_environment()
+    if ingestor is None:
+        print("Supabase disabled — set SUPABASE_URL and SUPABASE_SECRET_KEY in .env", flush=True)
+    return ingestor
+
+
+def run_cycle(ingestor: IngestionSink | None = None) -> list[dict]:
     print(f"\nChecking {len(SOURCES)} sources ({now_utc()})", flush=True)
+    if ingestor is not None:
+        try:
+            ingestor.flush()
+        except Exception as exc:
+            print(f"Supabase retry: FAILED — {type(exc).__name__}: {exc}", flush=True)
     results = []
     for source in SOURCES:
-        results.append(check_source(source))
+        try:
+            result = check_source(source)
+            results.append(result)
+        except Exception as exc:
+            print(f"{source['name']}: FAILED — {type(exc).__name__}: {exc}", flush=True)
+            result = {
+                "source_id": source["id"], "checked_at": now_utc(), "http_status": None,
+                "request_ok": False, "rate_limited": False, "retry_after": None,
+                "response_bytes": None, "error": f"{type(exc).__name__}: {exc}", "data": None,
+            }
+        if ingestor is not None:
+            try:
+                ingestor.ingest(source, result)
+            except Exception as exc:
+                print(f"Supabase {source['id']}: FAILED — {type(exc).__name__}: {exc}; local archives retained", flush=True)
         time.sleep(0.5)
     try:
         from transform_port_pegel import save, transform
-    except ModuleNotFoundError as exc:
-        if exc.name != "transform_port_pegel":
-            raise
-        print(
-            "Clean port data: SKIPPED — transform_port_pegel.py is missing; "
-            "source responses remain saved in data/.",
-            flush=True,
-        )
-        return results
 
-    try:
         clean_data = transform()
         saved_path = save(clean_data)
         print(f"Clean port data saved: {saved_path.relative_to(ROOT)}", flush=True)
+    except ModuleNotFoundError as exc:
+        if exc.name == "transform_port_pegel":
+            print(
+                "Clean port data: SKIPPED — transform_port_pegel.py is missing; "
+                "source responses remain saved in data/.",
+                flush=True,
+            )
+        else:
+            print(f"Clean port data: FAILED — {type(exc).__name__}: {exc}", flush=True)
     except (OSError, ValueError, KeyError, RuntimeError) as exc:
         print(f"Clean port data: FAILED — {exc}", flush=True)
+    except Exception as exc:
+        print(f"Clean port data: FAILED — {type(exc).__name__}: {exc}", flush=True)
     return results
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--once", action="store_true", help="run one cycle and exit")
+    parser.add_argument("--local-only", action="store_true", help="keep local archives without writing to Supabase")
     parser.add_argument("--interval", type=int, default=600, help="seconds between cycles in watch mode (default: 600)")
     args = parser.parse_args()
     if args.interval < 1:
         parser.error("--interval must be at least 1 second")
     try:
+        try:
+            ingestor = create_ingestor(args.local_only)
+        except (OSError, ValueError, RuntimeError) as exc:
+            print(f"Supabase disabled — {exc}; local collection continues", flush=True)
+            ingestor = None
         if args.once:
-            run_cycle()
+            run_cycle(ingestor)
             return 0
         print(f"Watching every {args.interval} seconds. Press Ctrl+C to stop.")
         while True:
-            run_cycle()
+            try:
+                run_cycle(ingestor)
+            except Exception as exc:
+                print(f"Cycle: FAILED — {type(exc).__name__}: {exc}", flush=True)
             time.sleep(args.interval)
     except KeyboardInterrupt:
         print("\nStopped.")

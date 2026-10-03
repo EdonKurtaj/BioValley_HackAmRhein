@@ -6,7 +6,7 @@ This prototype explores how weather, traffic, and Rhine signals can inform cold-
 
 ## The problem
 
-Who has it, and what they do today.
+A Basel-area factory needs a critical refrigerated material on time while preserving its 2–8 °C handling conditions. This demo combines public environmental measurements with explicit shipment context to explain planning recommendations.
 
 ## How to run it
 
@@ -16,7 +16,7 @@ From the repository root, run the saved open-data observations only. This is the
 PYTHONPATH=src python3 -m risk_assessment.cli
 ```
 
-If the saved observations are stale, refresh them once before running the assessment:
+The collector keeps local archives and also stores measurements in Supabase when the local `.env` is configured. See [collector setup](pythontest/README.md) and [database setup](supabase/README.md). The risk engine reads those same local archives; decision persistence is not implemented. Refresh observations before assessment (a successful fetch cannot make delayed source measurements current):
 
 ```sh
 python3 pythontest/api_requester.py --once
@@ -47,6 +47,12 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 For shipment-specific observed planning, supply ETA and need-by timestamps with timezones, and explicit route evidence via `--route-status clear|disrupted|unknown`. Weather enters the score only with `--exposed-handling`; use `--controlled-handling` for a protected transfer. Without confirmed handling, weather stays context only. Map traffic counters to the route using repeated `--traffic-counter 'SITE|DIRECTION|LANE'` arguments, with exact identifiers from the source; a comparable historical baseline is still required. An alternative route requires `--alternate-route-available`, `--alternate-route-suitable`, and `--alternate-eta-at`; the alternate ETA must be earlier than the original and no later than material need-by. Suitability is explicitly supplied scenario/operator evidence, not inferred by a routing service.
 
 Decision and System Suggestion share one policy. Missing essential shipment metadata produces Monitor; scores alone do not dispatch material. Observed-only logistics advice never authorizes product release.
+
+Run the collector checks as well:
+
+```sh
+python3 -m unittest discover -s pythontest -p 'test_*.py'
+```
 
 ## Data sources
 

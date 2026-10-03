@@ -19,6 +19,7 @@ secrets.*
 .npmrc
 .pypirc
 .netrc
+pythontest/data/
 
 # ---------- Operating systems ----------
 .DS_Store

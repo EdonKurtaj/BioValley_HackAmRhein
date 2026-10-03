@@ -100,7 +100,9 @@ create table if not exists public.manufacturing_decisions (
     material_id uuid not null references public.materials(id),
     lot_id uuid references public.material_lots(id),
     shipment_id uuid references public.shipments(id),
-    action text not null check (action in ('normal', 'buffer', 'expedite', 'reroute', 'quality_review')),
+    action text not null check (action in ('normal', 'buffer', 'expedite', 'reroute', 'quarantine')),
+    risk_score numeric not null check (risk_score between 0 and 100),
+    risk_level text not null check (risk_level in ('low', 'moderate', 'high', 'critical')),
     rationale text not null,
     evidence jsonb not null default '[]'::jsonb,
     decided_at timestamptz not null default now(),
@@ -162,13 +164,21 @@ drop policy if exists "Dashboard can read observations" on public.observations;
 create policy "Dashboard can read observations" on public.observations
     for select to anon, authenticated using (true);
 drop policy if exists "Dashboard can read materials" on public.materials;
+create policy "Dashboard can read materials" on public.materials
+    for select to anon, authenticated using (true);
 drop policy if exists "Dashboard can read material lots" on public.material_lots;
+create policy "Dashboard can read material lots" on public.material_lots
+    for select to anon, authenticated using (true);
 drop policy if exists "Dashboard can read shipments" on public.shipments;
+create policy "Dashboard can read shipments" on public.shipments
+    for select to anon, authenticated using (true);
 drop policy if exists "Dashboard can read decisions" on public.manufacturing_decisions;
-grant select on public.data_sources, public.fetch_runs, public.observations
-    to anon, authenticated;
-revoke all on public.materials, public.material_lots, public.shipments,
-    public.manufacturing_decisions from anon, authenticated;
+create policy "Dashboard can read decisions" on public.manufacturing_decisions
+    for select to anon, authenticated using (true);
+
+grant select on public.data_sources, public.fetch_runs, public.observations,
+    public.materials, public.material_lots, public.shipments,
+    public.manufacturing_decisions to anon, authenticated;
 grant all on public.data_sources, public.fetch_runs, public.observations,
     public.materials, public.material_lots, public.shipments,
     public.manufacturing_decisions to service_role;

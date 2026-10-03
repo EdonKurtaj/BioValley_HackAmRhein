@@ -95,7 +95,7 @@ def collect_local_context(data_dir: Path = DEFAULT_DATA_DIR) -> dict[str, Any]:
             if weather_snapshot.get("request_ok") else "unavailable",
         }
 
-    traffic_data = traffic.get("data", {}) if traffic else {}
+    traffic_data = (traffic.get("data") or {}) if traffic else {}
     traffic_results = traffic_data.get("results") or []
     traffic_latest_age = _age_minutes((traffic_results[0].get("datetimeto") or traffic_results[0].get("datetimefrom"))) if traffic_results else None
     traffic_context = {
@@ -108,7 +108,7 @@ def collect_local_context(data_dir: Path = DEFAULT_DATA_DIR) -> dict[str, Any]:
         "interpretation": "Counts alone do not establish congestion or travel time.",
     }
 
-    rhine_results = (rhine or {}).get("data", {}).get("results") or []
+    rhine_results = ((rhine or {}).get("data") or {}).get("results") or []
     latest_rhine = rhine_results[0] if rhine_results else None
     basel_stadt_age = _age_minutes(latest_rhine.get("timestamp")) if latest_rhine else None
     port_data = port or {}

@@ -60,7 +60,6 @@ def _weather_context_values(measurements: dict) -> list[str]:
         "dkl010z0": ("wind direction", "°"),
         "ure200s0": ("relative humidity", "%"),
         "tde200s0": ("dew point", "°C"),
-        "prestas0": ("pressure", "hPa"),
     }
     return [f"{name} {measurements[key]} {unit}" for key, (name, unit) in labels.items()
             if measurements.get(key) is not None]
@@ -305,7 +304,7 @@ def render_observed_summary(result: dict) -> str:
         f"Weather context-only fields: radiation {weather_measurements.get('gre000z0', 'unknown')} W/m², "
         f"sunshine {weather_measurements.get('sre000z0', 'unknown')} min, humidity {weather_measurements.get('ure200s0', 'unknown')}%, "
         f"dew point {weather_measurements.get('tde200s0', 'unknown')} °C, mean wind {weather_measurements.get('fu3010z0', 'unknown')} km/h, "
-        f"direction {weather_measurements.get('dkl010z0', 'unknown')}°, pressure {weather_measurements.get('prestas0', 'unknown')} hPa; "
+        f"direction {weather_measurements.get('dkl010z0', 'unknown')}°; "
         "not scored without a supported relationship/exposed transfer.",
         f"Rhine: Port gauge {port.get('value', 'unknown')} cm ({rhine.get('source_status', 'unknown')}, "
         f"measurement {_format_age(rhine.get('port_observation_age_minutes'))}, "

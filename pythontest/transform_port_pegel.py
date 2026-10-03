@@ -12,6 +12,7 @@ from api_requester import DATA_DIR, PageExtractor
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT_DIR = DATA_DIR / "port_pegel_clean"
+SWISS_NUMBER_PATTERN = r"[+-]?\d+(?:['’\u00a0\u202f\u2009 ]\d{3})*(?:[.,]\d+)?"
 
 
 class VisiblePageExtractor(PageExtractor):
@@ -44,10 +45,13 @@ class VisiblePageExtractor(PageExtractor):
 def latest_page(source_id: str) -> tuple[dict, str]:
     latest_path = DATA_DIR / source_id / "latest.json"
     record = json.loads(latest_path.read_text(encoding="utf-8"))
-    raw_relative = record.get("data", {}).get("raw_html_file")
+    data = record.get("data") or {}
+    raw_relative = data.get("raw_html_file")
     if not raw_relative:
-        raise RuntimeError(f"No saved HTML path in {latest_path}; run the API checker first.")
+        raise RuntimeError(f"No saved HTML path in {latest_path}; check the fetch and run the API checker first.")
     raw_path = ROOT / raw_relative
+    if not raw_path.is_file():
+        raise RuntimeError(f"Saved HTML file is missing or not a file: {raw_path}; check the fetch and run the API checker first.")
     return record, raw_path.read_text(encoding="utf-8", errors="replace")
 
 
@@ -58,15 +62,18 @@ def page_tables(html: str) -> tuple[list[list[list[str]]], str]:
     return parser.tables, " ".join(parser.text_parts)
 
 
+def parse_swiss_number(text: str) -> float | int:
+    normalized = text.translate(str.maketrans("", "", "'’\u00a0\u202f\u2009 ")).replace(",", ".")
+    value = float(normalized)
+    return int(value) if value.is_integer() else value
+
+
 def number_and_unit(text: str) -> tuple[int | float, str]:
-    match = re.fullmatch(r"\s*([+-]?\d+(?:[.,]\d+)?)\s*(.*?)\s*", text)
+    match = re.fullmatch(rf"\s*(?:ca\.?\s*)?({SWISS_NUMBER_PATTERN})\s*(.*?)\s*", text)
     if not match:
         raise ValueError(f"Could not parse measurement: {text!r}")
     raw_number, unit = match.groups()
-    value = float(raw_number.replace(",", "."))
-    if value.is_integer():
-        value = int(value)
-    return value, unit
+    return parse_swiss_number(raw_number), unit
 
 
 def parse_current(tables: list[list[list[str]]]) -> tuple[list[dict], list[dict]]:
@@ -87,18 +94,13 @@ def parse_current(tables: list[list[list[str]]]) -> tuple[list[dict], list[dict]
                 if len(row) < 3:
                     continue
                 water_level, level_unit = number_and_unit(row[1])
-                discharge_match = re.fullmatch(r"\s*(?:ca\.?\s*)?([\d.,]+)\s*(.*?)\s*", row[2])
-                if not discharge_match:
-                    raise ValueError(f"Could not parse flood discharge: {row[2]!r}")
-                discharge_value = float(discharge_match.group(1).replace(",", "."))
-                if discharge_value.is_integer():
-                    discharge_value = int(discharge_value)
+                discharge_value, discharge_unit = number_and_unit(row[2])
                 thresholds.append({
                     "mark": row[0],
                     "water_level": water_level,
                     "water_level_unit": level_unit,
                     "discharge_approx": discharge_value,
-                    "discharge_unit": discharge_match.group(2),
+                    "discharge_unit": discharge_unit,
                 })
     if not readings:
         raise RuntimeError("Could not find the current water-level table in the saved HTML.")
@@ -124,8 +126,8 @@ def parse_forecast(tables: list[list[list[str]]], text: str) -> dict:
             continue
         rows.append({
             "time": row[0],
-            "water_level_m_above_sea_level": float(row[1].replace(",", ".")),
-            "discharge_m3_per_second": float(row[2].replace(",", ".")),
+            "water_level_m_above_sea_level": float(parse_swiss_number(row[1])),
+            "discharge_m3_per_second": float(parse_swiss_number(row[2])),
         })
     return {
         "issued_at": matched_text(text, r"Ausgegeben am\s*/\s*Emission:\s*(.*?)\s*Meteolauf von"),

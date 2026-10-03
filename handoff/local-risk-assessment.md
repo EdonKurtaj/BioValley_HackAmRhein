@@ -69,3 +69,8 @@ Implemented on `feat/local-risk-assessment`; calculations run from saved request
 - Corrected stale 40/35/25 test expectations: full contributions 50/30/20, thermal-only half severity bounds 25–75, half route severity contributes 10 with bounds 10–90.
 - Corrected the previously masked coverage assertion: output rounds 1/3 evidence coverage to 33.3%, while group counts remain 1/3.
 - Added independent policy-total and mixed-severity checks. All 56 risk-engine tests pass; point 7 (collector/main/schema integration) remains separate.
+
+## Collector integration (review point 7)
+
+- Combined with origin/main collector; see [integration handoff](collector-risk-integration.md).
+- Original schema retained; access restrictions are a separate, unapplied migration.
