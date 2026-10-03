@@ -732,3 +732,35 @@ progress::-moz-progress-bar {
     grid-template-columns: 1fr;
   }
 }
+.routing-status,
+.route-legend {
+  background: var(--water);
+  color: var(--ink);
+  border: 1px solid var(--water-ink);
+  border-radius: 10px;
+  padding: 12px;
+  font-size: var(--font-small);
+  line-height: 1.5;
+}
+.routing-status {
+  margin: 12px 0;
+}
+.routing-status p {
+  margin: 5px 0 0;
+}
+.route-legend {
+  position: absolute;
+  z-index: 2;
+  top: 64px;
+  left: 16px;
+  right: 16px;
+  box-shadow: var(--shadow);
+}
+.route-legend strong,
+.route-legend span {
+  display: block;
+}
+.route-legend .text-button {
+  margin-top: 5px;
+  color: var(--water-ink);
+}

@@ -221,6 +221,33 @@ export function BaselMap({
     map.current?.easeTo({ center: BASEL_CENTER, zoom: BASEL_ZOOM });
   }, [resetKey]);
 
+  const selectedShipment = shipments.find(
+    (shipment) => shipment.id === selectedShipmentId,
+  );
+
+  function focusRouteDifference() {
+    if (!map.current || !selectedShipment) return;
+    const activePoints = new Set(
+      selectedShipment.route.map((point) => point.join(",")),
+    );
+    const otherPoints = new Set(
+      selectedShipment.alternativeRoute.map((point) => point.join(",")),
+    );
+    const differences = [
+      ...selectedShipment.route.filter(
+        (point) => !otherPoints.has(point.join(",")),
+      ),
+      ...selectedShipment.alternativeRoute.filter(
+        (point) => !activePoints.has(point.join(",")),
+      ),
+    ];
+    const bounds = new maplibregl.LngLatBounds();
+    (differences.length > 1 ? differences : selectedShipment.route).forEach(
+      (point) => bounds.extend(point),
+    );
+    map.current.fitBounds(bounds, { padding: 85, maxZoom: 15, duration: 600 });
+  }
+
   return (
     <>
       <div
@@ -228,6 +255,32 @@ export function BaselMap({
         className="map"
         aria-label="Interaktive Karte von Basel"
       />
+      {selectedShipment && selectedShipment.alternativeRoute.length > 1 && (
+        <div className="route-legend" role="status">
+          <strong>
+            {selectedShipment.id} ·{" "}
+            {selectedShipment.routing?.rerouted
+              ? "Umleitung aktiv"
+              : "Umleitung geplant"}
+          </strong>
+          <span>
+            {selectedShipment.routing?.rerouted
+              ? "Grün: aktive Umleitung · blau gestrichelt: ursprüngliche Route"
+              : "Abspielen: Wechsel nach 5 Demo-Minuten · blau gestrichelt: Alternative"}
+          </span>
+          <span>
+            Gemeinsame Straßen bleiben gleich; die Abzweigung liegt weiter auf
+            der Route.
+          </span>
+          <button
+            type="button"
+            className="text-button"
+            onClick={focusRouteDifference}
+          >
+            Routenunterschied ansehen ↗
+          </button>
+        </div>
+      )}
       {tileError && (
         <div className="tile-warning" role="status">
           Einige OpenStreetMap-Kartenausschnitte konnten nicht geladen werden.

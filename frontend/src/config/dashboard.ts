@@ -6,7 +6,7 @@ export const scenarioLabels: Record<DemoScenario, string> = {
   traffic: "Stau mit Zeitpuffer",
   urgent: "Stau + dringende Lieferung",
   heat: "Temperaturabweichung",
-  reroute: "Geeignete Alternativroute",
+  reroute: "BV-104 · Stau und Umleitung",
 };
 
 export const actionLabels: Record<ShipmentAction, string> = {

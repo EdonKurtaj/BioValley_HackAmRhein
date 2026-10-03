@@ -70,7 +70,9 @@ export function TransportSidebar({
               <span className={`action-pill action-${shipment.action}`}>
                 {shipment.status === "delivered"
                   ? "Angekommen"
-                  : actionLabels[shipment.action]}
+                  : shipment.routing?.rerouted
+                    ? "Umleitung aktiv"
+                    : actionLabels[shipment.action]}
               </span>
             </div>
             <p>

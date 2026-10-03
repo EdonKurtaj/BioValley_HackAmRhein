@@ -112,6 +112,20 @@ export function ShipmentDetails({
           Priorität {priorityLabels[shipment.priority]}
         </span>
       </div>
+      {shipment.routing && (
+        <div className="routing-status" role="status">
+          <strong>
+            {shipment.id} ·{" "}
+            {shipment.routing.rerouted ? "Umleitung aktiv" : "Routenplanung"}
+          </strong>
+          <p>{shipment.routing.message}.</p>
+          {shipment.routing.rerouted && (
+            <p>
+              Grün: aktive Umleitung · blau gestrichelt: ursprüngliche Route.
+            </p>
+          )}
+        </div>
+      )}
       <div className={`recommendation action-${shipment.action}`}>
         <span className="eyebrow">EMPFEHLUNG</span>
         <strong>{actionLabels[shipment.action]}</strong>
@@ -146,13 +160,6 @@ export function ShipmentDetails({
         <p className="hold-note">
           Qualitätshold: kontrolliert lagern und prüfen. Kein Weitertransport
           oder Produktionseinsatz ohne Freigabe.
-        </p>
-      )}
-      {shipment.routing && (
-        <p className="hold-note" role="status">
-          {shipment.routing.message} · {shipment.routing.candidateCount}{" "}
-          Routenkandidat(en).
-          {shipment.routing.rerouted && " Gestrichelt: ursprüngliche Route."}
         </p>
       )}
       <dl className="shipment-facts">
