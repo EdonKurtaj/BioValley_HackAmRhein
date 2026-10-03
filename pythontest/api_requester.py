@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
@@ -22,6 +23,7 @@ from zoneinfo import ZoneInfo
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
 TIMEOUT_SECONDS = 30
+RHINE_RECORD_LIMIT = 48
 
 SOURCES = [
     {
@@ -41,7 +43,8 @@ SOURCES = [
     {
         "id": "basel_dataset_100089",
         "name": "Basel-Stadt dataset 100089 records",
-        "url": "https://data.bs.ch/api/explore/v2.1/catalog/datasets/100089/records/?lang=en&limit=10&offset=0&order_by=-timestamp",
+        "url": "https://data.bs.ch/api/explore/v2.1/catalog/datasets/100089/records/",
+        "params": {"lang": "en", "limit": RHINE_RECORD_LIMIT, "offset": 0, "order_by": "-timestamp"},
         "kind": "json",
         "basel_auth": True,
     },
@@ -120,12 +123,20 @@ def clean_text(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
+def source_url(source: dict) -> str:
+    params = source.get("params")
+    if not params:
+        return source["url"]
+    separator = "&" if "?" in source["url"] else "?"
+    return source["url"] + separator + urlencode(params)
+
+
 def read_response(source: dict) -> tuple[int | None, dict, bytes | None, str | None]:
     headers = {"User-Agent": "api-requester/1.0 (local data monitoring)"}
     api_key = os.environ.get("API_KEY")
     if source.get("basel_auth") and api_key:
         headers["Authorization"] = f"Apikey {api_key}"
-    request = Request(source["url"], headers=headers, method="GET")
+    request = Request(source_url(source), headers=headers, method="GET")
     try:
         with urlopen(request, timeout=TIMEOUT_SECONDS) as response:
             return response.status, dict(response.headers.items()), response.read(), None
@@ -187,7 +198,7 @@ def check_source(source: dict) -> dict:
     result = {
         "source_id": source["id"],
         "name": source["name"],
-        "url": source["url"],
+        "url": source_url(source),
         "checked_at": checked_at,
         "http_status": status,
         "request_ok": ok,
@@ -230,9 +241,6 @@ def check_source(source: dict) -> dict:
     return result
 
 
-METEO_PARAMETER_URL = "https://data.geo.admin.ch/ch.meteoschweiz.ogd-smn/ogd-smn_meta_parameters.csv"
-
-
 def parse_csv_value(value: str) -> object:
     value = value.strip()
     if not value:
@@ -242,74 +250,6 @@ def parse_csv_value(value: str) -> object:
         return int(number) if number.is_integer() else number
     except ValueError:
         return value
-
-
-def fetch_station_current(station: dict) -> tuple[dict, bytes | None, str | None, int | None, str | None]:
-    asset = next(
-        (asset for key, asset in station.get("assets", {}).items() if key.endswith("_t_now.csv")),
-        None,
-    )
-    station_info = {
-        "station_id": station.get("id"),
-        "name": station.get("properties", {}).get("title"),
-        "coordinates_lon_lat": station.get("geometry", {}).get("coordinates"),
-    }
-    if not asset:
-        return station_info, None, "No ten-minute current-data CSV available", None, None
-    response = Request(asset["href"], headers={"User-Agent": "api-requester/1.0 (local data monitoring)"})
-    try:
-        with urlopen(response, timeout=TIMEOUT_SECONDS) as answer:
-            body = answer.read()
-            rows = list(csv.DictReader(io.StringIO(body.decode("utf-8-sig", errors="replace")), delimiter=";"))
-            if not rows:
-                raise ValueError("CSV has no measurement rows")
-            timestamp_column = "reference_timestamp"
-            def timestamp_key(row: dict) -> datetime:
-                return datetime.strptime(row[timestamp_column], "%d.%m.%Y %H:%M")
-            latest_row = max(rows, key=timestamp_key)
-            timestamp = latest_row.pop(timestamp_column, None)
-            abbreviation = latest_row.pop("station_abbr", None)
-            station_info["station_abbr"] = abbreviation
-            station_info["observed_at"] = timestamp
-            wanted = station.get("measurement_parameters")
-            station_info["measurements"] = {
-                key: parse_csv_value(value)
-                for key, value in latest_row.items()
-                if not wanted or key in wanted
-            }
-            station_info["measurement_count"] = sum(value is not None for value in station_info["measurements"].values())
-            return station_info, body, None, answer.status, answer.headers.get("Retry-After")
-    except HTTPError as exc:
-        return station_info, None, str(exc), exc.code, exc.headers.get("Retry-After")
-    except (URLError, TimeoutError, OSError, ValueError, KeyError) as exc:
-        return station_info, None, str(exc), None, None
-
-
-def load_meteo_parameter_metadata() -> dict:
-    """Cache the official parameter dictionary locally and map CSV codes to names/units."""
-    folder = DATA_DIR / "meteoswiss_basel_temperature"
-    cache_path = folder / "parameter_metadata.csv"
-    if not cache_path.exists():
-        request = Request(METEO_PARAMETER_URL, headers={"User-Agent": "api-requester/1.0 (local data monitoring)"})
-        with urlopen(request, timeout=TIMEOUT_SECONDS) as response:
-            cache_path.parent.mkdir(parents=True, exist_ok=True)
-            cache_path.write_bytes(response.read())
-    raw = cache_path.read_bytes()
-    try:
-        text = raw.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        text = raw.decode("cp1252")
-    rows = csv.DictReader(io.StringIO(text), delimiter=";")
-    return {
-        row["parameter_shortname"]: {
-            "name_de": row.get("parameter_description_de", ""),
-            "name_en": row.get("parameter_description_en", ""),
-            "unit": row.get("parameter_unit", ""),
-            "group": row.get("parameter_group_de", ""),
-        }
-        for row in rows
-        if row.get("parameter_shortname")
-    }
 
 
 def check_meteoswiss_current(source: dict) -> dict:

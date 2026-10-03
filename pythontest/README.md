@@ -19,6 +19,8 @@ Each source has a local folder under `pythontest/data/`:
 
 The port transformer reads the last successful HTML. Its `current_page_checked_at` and `forecast_page_checked_at` retain the original fetch times, so consumers can identify stale data. If a source has never succeeded, no `latest.json` is created.
 
+See [data request notes](../docs/data-notes.md) for source limits, the Rhine history window, and live verification.
+
 Run the offline archive regression checks:
 
 ```sh

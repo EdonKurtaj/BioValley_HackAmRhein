@@ -1,0 +1,30 @@
+# Data request notes
+
+## Rhine water level and discharge — dataset 100089
+
+The requester uses `RHINE_RECORD_LIMIT = 48` in this source's `params`, with `offset=0` and `order_by=-timestamp`. URL parameters are encoded when constructing the request; the archive records the full requested URL.
+
+The [official Explore API documentation](https://help.opendatasoft.com/apis/ods-explore-v2/) states that the maximum `limit` is 100. Live boundary checks against the [Basel-Stadt records endpoint](https://data.bs.ch/api/explore/v2.1/catalog/datasets/100089/records/) on 2026-10-03 confirmed:
+
+| Requested limit | HTTP status | Response |
+| --- | --- | --- |
+| 200 | 400 | InvalidRESTParameterError; limit must be between -1 and 100 |
+| 100 | 200 | 100 records returned |
+| 101 | 400 | InvalidRESTParameterError; limit must be between -1 and 100 |
+| 48 | 200 | 48 records returned in the requester's live `--once` run |
+
+All checks used `lang=en`, `offset=0`, and `order_by=-timestamp`. Example [rejected limit=200 request](https://data.bs.ch/api/explore/v2.1/catalog/datasets/100089/records/?lang=en&limit=200&offset=0&order_by=-timestamp) and [configured limit=48 request](https://data.bs.ch/api/explore/v2.1/catalog/datasets/100089/records/?lang=en&limit=48&offset=0&order_by=-timestamp).
+
+The saved 48 rows span 2026-10-03 05:15 to 09:10 UTC. At a five-minute cadence, 48 samples cover approximately four hours; the interval between the oldest and newest sample is 47 × 5 minutes = 3 hours 55 minutes. Missing observations can change that span; use the actual timestamps when calculating rates.
+
+The live acceptance check confirmed `len(latest["data"]["results"]) == 48` in `pythontest/data/basel_dataset_100089/latest.json`.
+
+## Traffic — dataset 100006
+
+The traffic request remains unchanged at `limit=10`, ordered by `-datetimefrom`. The live run returned 10 records. A counting-station filter is outside this change.
+
+## MeteoSwiss current measurements
+
+The requester continues to read the current-values CSV directly. The old STAC station-fetch function, parameter-metadata loader, and metadata URL constant were removed after a repository search found no external callers. `parse_csv_value`, `csv`, `io`, `ZoneInfo`, and `re` remain in use.
+
+The live `--once` run completed with HTTP 200 for all five sources and successful port transformation. MeteoSwiss still prints temperature, the observation time in Europe/Zurich, and measurement age in the same format; an offline test checks the exact status line with a fixed clock.
