@@ -13,10 +13,11 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "pythontest"))
 
 import api_requester
+from opentransportdata import extract_counter_readings
 from normalize_observations import normalize
 from weather_parameters import WEATHER_PARAMETERS
 
-from risk_assessment.interfaces import RouteEvidence
+from risk_assessment.interfaces import RoadCounterMatch, RouteEvidence
 from risk_assessment.local_data import collect_local_context
 from risk_assessment.observed import assess_observed_data
 
@@ -80,6 +81,27 @@ class CollectorIntegrationTests(unittest.TestCase):
         context = collect_local_context(self.data_dir)
         self.assertEqual(context["traffic"]["source_status"], "unknown")
         self.assertIsNone(context["rhine"]["basel_stadt_latest"])
+
+    def test_parsed_truck_speed_feeds_storage_rows_and_risk_from_same_archive(self):
+        timestamp = datetime.now(timezone.utc).isoformat()
+        xml = f'''<root><siteMeasurements>
+          <measurementSiteReference id="detector"/>
+          <measurementTimeDefault>{timestamp}</measurementTimeDefault>
+          <measuredValue index="22"><speed>40</speed></measuredValue>
+          <measuredValue index="21"><vehicleFlowRate>600</vehicleFlowRate></measuredValue>
+        </siteMeasurements></root>'''.encode()
+        payload = {"fetched_at": timestamp, "errors": [], "traffic_situations": [],
+                   "traffic_counters": {"sites": [], "current_readings": extract_counter_readings(xml, {"detector"})}}
+        source = next(source for source in api_requester.SOURCES if source["kind"] == "opentransportdata")
+        result = api_requester.check_opentransportdata(source, snapshot=payload)
+        rows = normalize(result)
+        self.assertEqual({row["metric"]: (row["value"], row["unit"]) for row in rows},
+                         {"heavy_goods_average_speed_kmh": (40, "km/h"), "heavy_goods_flow_per_hour": (600, "vehicles/hour")})
+        route = RouteEvidence(road_counters=(RoadCounterMatch("detector", "heavy", 80),))
+        assessment = assess_observed_data(self.data_dir, route)
+        self.assertEqual(assessment["current_observations"]["road_traffic"]["severity_0_to_100"], 50)
+        self.assertEqual(assessment["manufacturing_priority_score"]["score"], 5)
+        self.assertEqual(assessment["action"]["recommendation"], "monitor")
 
 
 if __name__ == "__main__":

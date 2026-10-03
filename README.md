@@ -62,6 +62,14 @@ Run the collector checks as well:
 python3 -m unittest discover -s pythontest -p 'test_*.py'
 ```
 
+## OpenTransportData route evidence
+
+The default assessment displays the collected road candidate counts and includes their details in JSON. To score a detector you have verified is on the remaining shipment route, repeat `--road-counter 'SITE_ID|light|NORMAL_SPEED_KMH'` or use `heavy` for trucks. The normal speed must be a documented comparable reference, not an assumed speed limit. For example, `--road-counter 'CH:0006.01|light|80'` specifies an **illustrative operator assertion**, not a verified route or measured baseline provided by this repository.
+
+For a reviewed event, use `--road-event 'EVENT_ID|restricted|SOURCE_UPDATED_AT'` or effect `disrupted`. Copy the exact version timestamp from `current_observations.road_traffic.traffic_situations` in JSON after checking its location, direction and vehicle applicability. Changed, expired, revoked, stale or unsupported event versions are excluded. These flags apply to observed mode (or the observed portion of `--scenario all`). An updated collector fetch is needed to add event version and validity metadata to older archives.
+
+The terminal now reports the known score contribution and a range for missing evidence. See [calculation, applicability and limits](docs/risk-assessment.md#opentransportdata-road-evidence). Missing shipment route information remains unknown; no route or ETA is invented.
+
 ## Data sources
 
 See [docs/SOURCES.md](docs/SOURCES.md).

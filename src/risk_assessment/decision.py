@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from math import isfinite
 
+from .config import ROAD_SPEED_WATCH_SEVERITY
 from .interfaces import Assessment, ExposureMetrics, RouteEvidence
 from .priority import TRAFFIC_ANOMALY_REFERENCE_Z, PriorityScore
 
@@ -25,11 +26,13 @@ def decide_action(
     """
     if not isfinite(route.buffer_hours) or route.buffer_hours < 0:
         raise ValueError("buffer hours must be finite and non-negative")
-    for value in (route.traffic_anomaly, route.weather_severity):
+    for value in (route.traffic_anomaly, route.weather_severity, route.road_traffic_severity):
         if value is not None and not isfinite(value):
             raise ValueError("shipment signals must be finite")
     if route.weather_severity is not None and not 0 <= route.weather_severity <= 100:
         raise ValueError("weather severity must be between 0 and 100")
+    if route.road_traffic_severity is not None and not 0 <= route.road_traffic_severity <= 100:
+        raise ValueError("road severity must be between 0 and 100")
     for timestamp in (route.estimated_arrival_at, route.material_needed_at, route.alternate_arrival_at):
         if timestamp is not None and (timestamp.tzinfo is None or timestamp.utcoffset() is None):
             raise ValueError("logistics timestamps must include a timezone")
@@ -55,6 +58,8 @@ def decide_action(
         return result("monitor", "Shipment ETA and material need-by time are required before selecting a transport action.", "timing unknown")
     traffic = (route.traffic_route_matched and route.traffic_anomaly is not None
                and route.traffic_anomaly >= TRAFFIC_ANOMALY_REFERENCE_Z)
+    traffic = traffic or (route.road_traffic_severity is not None
+                          and route.road_traffic_severity >= ROAD_SPEED_WATCH_SEVERITY)
     weather = (route.exposed_handling is True and route.weather_severity is not None
                and route.weather_severity > 0)
     if (route.exposed_handling is None

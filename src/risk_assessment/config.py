@@ -43,3 +43,10 @@ STRONG_GUST_MAX_KMH = 120.0
 # Illustrative UI scenario assumption only; replace with factory operating slack.
 DEFAULT_BUFFER_HOURS = 4.0
 DEFAULT_SENSOR_MAX_GAP = timedelta(minutes=15)
+
+# Minute counters require a recent measurement, independent of the fetch time.
+ROAD_COUNTER_FRESHNESS_MINUTES = 5.0
+# Event snapshots are polled by the regular ten-minute collector.
+ROAD_EVENT_FRESHNESS_MINUTES = 15.0
+# Demo action watch threshold: 50% speed loss, not a calibrated congestion probability.
+ROAD_SPEED_WATCH_SEVERITY = 50.0

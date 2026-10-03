@@ -12,7 +12,7 @@ from pathlib import Path
 from .decision import decide_action, parse_time, suggestion_from_assessment
 from .config import ROUTE_WEIGHT, THERMAL_WEIGHT, URGENCY_WEIGHT
 from .disturbance import detect_open_data_disturbances
-from .interfaces import RouteEvidence, TrafficCounterMatch
+from .interfaces import RoadCounterMatch, RoadEventMatch, RouteEvidence, TrafficCounterMatch
 from .logistics import TrafficAnomaly, classify_rhine_high_water, traffic_volume_anomaly
 from .local_data import DEFAULT_DATA_DIR, collect_local_context, read_snapshot
 from .observed import assess_observed_data, render_observed_summary
@@ -28,6 +28,30 @@ def parse_traffic_counters(values: list[str]) -> tuple[TrafficCounterMatch, ...]
         if len(parts) != 3 or not parts[0].strip() or not parts[1].strip():
             raise ValueError("traffic counter must be SITE|DIRECTION|LANE")
         matches.append(TrafficCounterMatch(parts[0].strip(), parts[1].strip(), int(parts[2])))
+    return tuple(matches)
+
+
+def parse_road_counters(values: list[str]) -> tuple[RoadCounterMatch, ...]:
+    matches = []
+    for value in values:
+        parts = value.split("|")
+        if len(parts) != 3 or not parts[0].strip() or parts[1] not in ("light", "heavy"):
+            raise ValueError("road counter must be SITE_ID|light or heavy|NORMAL_SPEED_KMH")
+        speed = float(parts[2])
+        if not isfinite(speed) or speed <= 0:
+            raise ValueError("road normal speed must be finite and positive")
+        matches.append(RoadCounterMatch(parts[0].strip(), parts[1], speed))
+    return tuple(matches)
+
+
+def parse_road_events(values: list[str]) -> tuple[RoadEventMatch, ...]:
+    matches = []
+    for value in values:
+        parts = value.split("|")
+        if len(parts) != 3 or not parts[0].strip() or parts[1] not in ("disrupted", "restricted"):
+            raise ValueError("road event must be ID|disrupted or restricted|SOURCE_UPDATED_AT")
+        parse_time(parts[2])
+        matches.append(RoadEventMatch(parts[0].strip(), parts[1], parts[2]))
     return tuple(matches)
 
 
@@ -56,6 +80,10 @@ def build_parser() -> argparse.ArgumentParser:
     handling.add_argument("--controlled-handling", dest="exposed_handling", action="store_const", const=False)
     parser.add_argument("--traffic-counter", action="append", default=[], metavar="SITE|DIRECTION|LANE",
                         help="Route-matched counter; repeat for multiple lanes")
+    parser.add_argument("--road-counter", action="append", default=[], metavar="ID|CLASS|NORMAL_KMH",
+                        help="Verified remaining-route detector; class light/heavy and comparable normal speed. Observed mode only.")
+    parser.add_argument("--road-event", action="append", default=[], metavar="ID|EFFECT|UPDATED_AT",
+                        help="Verified event direction/vehicle applicability, effect disrupted/restricted, exact source version time. Observed mode only.")
     parser.add_argument("--rhine-route-segment", choices=("basel_mittlere_bruecke_birsfelden", "rheinfelden_kembs"))
     parser.add_argument("--port-water-level-cm", type=float)
     parser.add_argument("--traffic-count", type=float)
@@ -342,6 +370,8 @@ def render_scenario_summary(result: dict) -> str:
 
 def main() -> int:
     args = build_parser().parse_args()
+    if (args.road_counter or args.road_event) and args.scenario not in ("observed", "all"):
+        raise SystemExit("Road evidence options apply to observed assessment; use --scenario observed or all.")
     if args.scenario in ("observed", "all"):
         try:
             result = run_observed(args) if args.scenario == "observed" else run_demo_suite_data(args)
@@ -376,6 +406,8 @@ def run_observed(args: argparse.Namespace) -> dict:
         buffer_hours=args.buffer_hours,
         exposed_handling=args.exposed_handling,
         traffic_counters=parse_traffic_counters(args.traffic_counter),
+        road_counters=parse_road_counters(args.road_counter),
+        road_events=parse_road_events(args.road_event),
         alternate_route_suitable=args.alternate_route_suitable,
         alternate_arrival_at=parse_time(args.alternate_eta_at),
     )

@@ -43,6 +43,44 @@ class TrafficCounterMatch:
 
 
 @dataclass(frozen=True)
+class RoadCounterMatch:
+    """Operator-verified detector/direction on the remaining route, with a reference speed.
+
+    Reference speed is a supplied comparable normal speed, not a statutory speed limit.
+    Vehicle class is explicit; car speeds must never silently substitute for truck speeds.
+    """
+
+    site_id: str
+    vehicle_class: Literal["light", "heavy"]
+    reference_speed_kmh: float
+
+
+@dataclass(frozen=True)
+class RoadEventMatch:
+    """Operator-verified event location, direction and vehicle applicability.
+
+    Verification applies only to the exact source update timestamp; changed messages
+    require a new review. Effect is supplied by the operator, never inferred from text.
+    """
+
+    situation_id: str
+    effect: Literal["disrupted", "restricted"]
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class RoadTrafficEvidence:
+    """Current matched road signals and auditable exclusions; no inferred ETA."""
+
+    severity: float | None = None
+    restricted: bool = False
+    disrupted: bool = False
+    evidence: tuple[str, ...] = ()
+    omitted: tuple[str, ...] = ()
+    context: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class RouteEvidence:
     """Route evidence must be explicit; absent inputs remain unknown."""
 
@@ -60,6 +98,9 @@ class RouteEvidence:
     weather_severity: float | None = None
     alternate_route_suitable: bool | None = None
     alternate_arrival_at: datetime | None = None
+    road_counters: tuple[RoadCounterMatch, ...] = ()
+    road_events: tuple[RoadEventMatch, ...] = ()
+    road_traffic_severity: float | None = None
 
 
 @dataclass(frozen=True)

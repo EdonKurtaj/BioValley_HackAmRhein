@@ -17,6 +17,7 @@ from .config import (
 from .disturbance import detect_open_data_disturbances, detect_traffic_disturbance, score_weather_context
 from .decision import decide_action, suggestion_from_assessment
 from .interfaces import RouteEvidence
+from .road_traffic import assess_road_traffic
 from .local_data import DEFAULT_DATA_DIR, collect_local_context, read_snapshot
 from .logistics import RhineStatus, classify_rhine_high_water
 
@@ -99,6 +100,18 @@ def assess_observed_data(
     if traffic_finding.robust_z is not None:
         traffic_severity = min(100.0, max(0.0, traffic_finding.robust_z / TRAFFIC_ANOMALY_THRESHOLD * 100.0))
 
+    road = assess_road_traffic(data_dir, route)
+    known_traffic = [value for value in (traffic_severity, road.severity) if value is not None]
+    traffic_severity = max(known_traffic) if known_traffic else None
+    selected_traffic_missing = (
+        (bool(route.traffic_counters) and traffic_finding.robust_z is None)
+        or (bool(route.road_counters or route.road_events) and road.severity is None)
+    )
+    # Maximum fusion needs all selected inputs, except when a known signal
+    # already reaches the maximum and missing evidence cannot increase it.
+    if selected_traffic_missing and traffic_severity != 100:
+        traffic_severity = None
+
     rhine = context.get("rhine") or {}
     port = rhine.get("port_basel_rheinhalle") or {}
     level = port.get("value")
@@ -118,8 +131,8 @@ def assess_observed_data(
                    weather_signal["score"] if weather_signal["current_score_eligible"] else None,
                    OPEN_WEATHER_WEIGHT,
                    weather_signal["evidence"]),
-        _component("traffic", traffic_finding.status, traffic_severity, OPEN_TRAFFIC_WEIGHT,
-                   [traffic_finding.summary, *traffic_finding.evidence]),
+        _component("traffic", "available" if traffic_severity is not None else "unknown", traffic_severity, OPEN_TRAFFIC_WEIGHT,
+                   [traffic_finding.summary, *traffic_finding.evidence, *road.evidence, *road.omitted]),
         _component("rhine", rhine_status.status,
                    _rhine_severity(port_level_for_score, route_segment, rhine_status.status), OPEN_RHINE_WEIGHT,
                    [rhine_status.reason]),
@@ -145,8 +158,10 @@ def assess_observed_data(
     score = round(sum(item["contributed_points"] for item in known), 1) if known else None
     matched_route = replace(
         route,
-        route_restricted=route.route_restricted or rhine_status.status == "restricted",
-        disruption_observed=True if rhine_status.status == "pre_alert" else route.disruption_observed,
+        route_restricted=route.route_restricted or road.restricted or rhine_status.status == "restricted",
+        disruption_observed=True if road.disrupted or rhine_status.status == "pre_alert" else route.disruption_observed,
+        road_traffic_severity=road.severity,
+        evidence=(*route.evidence, *road.evidence),
         traffic_anomaly=traffic_finding.robust_z,
         traffic_route_matched=traffic_finding.robust_z is not None,
         weather_severity=weather_signal["score"] if weather_signal["current_score_eligible"] else None,
@@ -200,7 +215,7 @@ def assess_observed_data(
             omitted_data.append("Additional weather fields shown as context only, not scored: "
                                 + ", ".join(present_context) + ".")
 
-    if traffic_severity is not None:
+    if traffic_finding.robust_z is not None:
         considered_data.append(
             "Traffic anomaly: fresh count and same-counter baseline were scored "
             f"({traffic_context.get('latest_record_age_minutes', 'unknown')} min old)."
@@ -211,6 +226,13 @@ def assess_observed_data(
             + (traffic_finding.summary.rstrip(".") + "." if traffic_finding.summary else "no usable traffic evidence.")
             + (" A comparable baseline is also unavailable." if not traffic_context.get("baseline_available") else "")
         )
+
+    considered_data.extend(road.evidence)
+    omitted_data.extend(road.omitted)
+    if selected_traffic_missing and traffic_severity is None:
+        omitted_data.append("Combined traffic score remains unknown: an explicitly selected traffic source is unavailable.")
+    if road.evidence and road.severity is None:
+        omitted_data.append("OpenTransportData score omitted: some selected road evidence is unavailable.")
 
     if rhine_status.status != "unknown":
         considered_data.append(
@@ -251,14 +273,18 @@ def assess_observed_data(
         "system_suggestion": system_suggestion,
         "manufacturing_priority_score": {
             "score": score,
+            "minimum": round(score or 0.0, 1),
+            "maximum": round(min(100.0, (score or 0.0) + 100 - score_weight_coverage), 1),
             "coverage_percent": round(coverage, 1),
             "evidence_coverage": evidence_groups,
             "score_weight_coverage_percent": round(score_weight_coverage, 1),
             "components": components,
-            "interpretation": "Evidence coverage counts usable input groups out of four, independent of their score weights. Score-weight coverage separately reports the total weight represented by those groups. Missing/stale inputs are excluded, not treated as zero.",
+            "interpretation": "Evidence coverage counts usable input groups out of four, independent of their score weights. Score-weight coverage separately reports the total weight represented by those groups. Missing/stale inputs are excluded, not treated as zero. Score is the known contribution; minimum/maximum bound missing component weights, not statistical uncertainty.",
         },
         "data_review": {"considered": considered_data, "omitted": omitted_data},
         "current_observations": {
+            "road_traffic": {**road.context, "severity_0_to_100": road.severity,
+                             "evidence": road.evidence, "omitted": road.omitted},
             "weather": weather,
             "weather_score_details": weather_signal,
                         "traffic": {**traffic_context, "latest_observation": newest_traffic,
@@ -266,7 +292,14 @@ def assess_observed_data(
             "rhine": {**rhine, "shipment_segment": route_segment,
                       "finding": rhine_status.__dict__},
         },
-        "detected_open_data_disturbances": detect_open_data_disturbances(data_dir, route.traffic_counters, route_segment),
+        "detected_open_data_disturbances": [
+            *detect_open_data_disturbances(data_dir, route.traffic_counters, route_segment),
+            {"source": "OpenTransportData road traffic",
+             "status": "unknown" if road.severity is None else "detected" if road.severity > 0 else "no_anomaly",
+             "summary": "Verified route evidence; severity is a policy index, not predicted delay.",
+             "severity_0_to_100": road.severity, "evidence": road.evidence, "omitted": road.omitted,
+             "action_effect": "Existing shipment ETA, handling and alternate-route checks apply."},
+        ],
     }
 
 
@@ -300,7 +333,7 @@ def render_observed_summary(result: dict) -> str:
         f"{traffic_row.get('total', 'unknown')} at {traffic_row.get('sitename', 'unknown')} "
         f"(pw {traffic_row.get('pw', 'unknown')}, delivery vans {traffic_row.get('lief', 'unknown')}, heavy vehicles {traffic_row.get('lw', 'unknown')}) is "
         f"{_format_age(traffic.get('latest_record_age_minutes'))}; "
-        f"baseline available: {traffic.get('baseline_available', False)}; {'excluded' if components['traffic']['contributed_points'] is None else 'scored'}.",
+        f"baseline available: {traffic.get('baseline_available', False)}; {'excluded' if not traffic.get('baseline_available') else 'scored'}.",
         f"Weather context-only fields: radiation {weather_measurements.get('gre000z0', 'unknown')} W/m², "
         f"sunshine {weather_measurements.get('sre000z0', 'unknown')} min, humidity {weather_measurements.get('ure200s0', 'unknown')}%, "
         f"dew point {weather_measurements.get('tde200s0', 'unknown')} °C, mean wind {weather_measurements.get('fu3010z0', 'unknown')} km/h, "
@@ -314,7 +347,11 @@ def render_observed_summary(result: dict) -> str:
         f"ship leg {'supplied' if rhine.get('shipment_segment') else 'not supplied'}, so route effect {'scored' if components['rhine']['contributed_points'] is not None else 'excluded'}.",
         f"Production urgency: {components['production_urgency']['status']}.",
         f"Decision: {result['action']['recommendation'].replace('_', ' ').title()} — {result['action']['reason']}",
-        f"Current Risk Score: {current_score}/100",
+        f"Current Risk Score: {current_score}/100 (known contribution); "
+        f"missing-evidence range {score['minimum']:g}–{score['maximum']:g}/100.",
+        f"OpenTransportData: {len(observations['road_traffic']['current_readings'])} counter readings, "
+        f"{len(observations['road_traffic']['traffic_situations'])} event candidates; "
+        f"matched severity {observations['road_traffic']['severity_0_to_100'] if observations['road_traffic']['severity_0_to_100'] is not None else 'unknown'}/100.",
         f"Evidence coverage: {score['evidence_coverage']['available']}/{score['evidence_coverage']['total']} input groups ({score['coverage_percent']:.0f}%). "
         f"Score-weight coverage: {score['score_weight_coverage_percent']:.0f}/100 points.",
         f"System Suggestion: {result['system_suggestion']['suggestion']} — {result['system_suggestion']['reason']}",
