@@ -26,7 +26,7 @@ TIMEOUT_SECONDS = 30
 SOURCES = [
     {
         "id": "meteoswiss_basel_temperature",
-        "name": "MeteoSwiss Basel/Binningen temperature",
+        "name": "MeteoSwiss Basel/Binningen current weather",
         "url": "https://data.geo.admin.ch/ch.meteoschweiz.messwerte-aktuell/VQHA80.csv",
         "kind": "meteo_current",
         "station_id": "BAS",
@@ -325,18 +325,34 @@ def check_meteoswiss_current(source: dict) -> dict:
             temperature = parse_csv_value(row.get("tre200s0", ""))
             if not isinstance(temperature, (int, float)):
                 raise ValueError("Current temperature value tre200s0 is missing")
+            precipitation_text = row.get("rre150z0", "").strip()
+            precipitation_total = (
+                None if precipitation_text in ("", "-") else parse_csv_value(precipitation_text)
+            )
+            if precipitation_total is not None and not isinstance(precipitation_total, (int, float)):
+                raise ValueError("Current precipitation value rre150z0 is invalid")
             station.update({
                 "observed_at_utc": observed_utc.isoformat().replace("+00:00", "Z"),
                 "observed_at": observed_local.isoformat(timespec="minutes"),
                 "time_zone": "Europe/Zurich",
                 "age_minutes_at_fetch": round((datetime.now(timezone.utc) - observed_utc).total_seconds() / 60, 1),
-                "measurements": {"tre200s0": temperature},
+                "measurements": {
+                    "tre200s0": temperature,
+                    "rre150z0": precipitation_total,
+                },
             })
-            parameter_metadata = {"tre200s0": {
-                "name_de": "Lufttemperatur 2 m über Boden; Momentanwert",
-                "name_en": "Air temperature 2 m above ground; current value",
-                "unit": "°C",
-            }}
+            parameter_metadata = {
+                "tre200s0": {
+                    "name_de": "Lufttemperatur 2 m über Boden; Momentanwert",
+                    "name_en": "Air temperature 2 m above ground; current value",
+                    "unit": "°C",
+                },
+                "rre150z0": {
+                    "name_de": "Niederschlag; Zehnminutensumme",
+                    "name_en": "Precipitation; ten-minute total",
+                    "unit": "mm",
+                },
+            }
         except (UnicodeError, csv.Error, KeyError, ValueError) as exc:
             error = f"Could not parse MeteoSwiss current-values CSV: {exc}"
     rate_limited = status == 429
@@ -373,7 +389,12 @@ def check_meteoswiss_current(source: dict) -> dict:
         status_line = "FAILED — could not save response"
     elif result["request_ok"]:
         temp = station["measurements"]["tre200s0"]
-        status_line = f"OK — HTTP {status} — {temp} °C at {station['observed_at']} ({station['age_minutes_at_fetch']} min old; Europe/Zurich)"
+        precipitation = station["measurements"]["rre150z0"]
+        precipitation_label = "unavailable" if precipitation is None else f"{precipitation} mm/10 min"
+        status_line = (
+            f"OK — HTTP {status} — {temp} °C, precipitation {precipitation_label} "
+            f"at {station['observed_at']} ({station['age_minutes_at_fetch']} min old; Europe/Zurich)"
+        )
     else:
         status_line = f"FAILED — HTTP {status or 'connection error'} — {error}"
     print(f"{source['name']}: {status_line}", flush=True)
