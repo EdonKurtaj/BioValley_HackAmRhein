@@ -161,13 +161,17 @@ def parse_payload(source: dict, body: bytes | None) -> tuple[object, str | None]
 def save_result(source: dict, result: dict, body: bytes | None) -> None:
     folder = DATA_DIR / source["id"]
     folder.mkdir(parents=True, exist_ok=True)
-    if body is not None and source["kind"] == "html":
-        raw_dir = folder / "raw"
-        raw_dir.mkdir(exist_ok=True)
-        raw_path = raw_dir / (result["checked_at"].replace(":", "-") + ".html")
-        raw_path.write_bytes(body)
-        result["data"]["raw_html_file"] = str(raw_path.relative_to(ROOT))
-    (folder / "latest.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    if result["request_ok"]:
+        if body is not None and source["kind"] == "html":
+            raw_dir = folder / "raw"
+            raw_dir.mkdir(exist_ok=True)
+            raw_path = raw_dir / (result["checked_at"].replace(":", "-") + ".html")
+            raw_path.write_bytes(body)
+            result["data"]["raw_html_file"] = str(raw_path.relative_to(ROOT))
+        result_path = folder / "latest.json"
+    else:
+        result_path = folder / "last_error.json"
+    result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     with (folder / "history.jsonl").open("a", encoding="utf-8") as history:
         history.write(json.dumps(result, ensure_ascii=False, separators=(",", ":")) + "\n")
 
@@ -205,11 +209,12 @@ def check_source(source: dict) -> dict:
         result["save_error"] = save_error
         # If the first write succeeded but a later archive write failed, keep
         # the latest status honest whenever the filesystem still permits it.
-        try:
-            latest_path = DATA_DIR / source["id"] / "latest.json"
-            latest_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        except OSError:
-            pass
+        if result["request_ok"]:
+            try:
+                latest_path = DATA_DIR / source["id"] / "latest.json"
+                latest_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            except OSError:
+                pass
     label = source["name"]
     if rate_limited:
         outcome = f"FAILED — rate limited (HTTP 429; Retry-After: {result['retry_after'] or 'not provided'})"
@@ -384,26 +389,30 @@ def run_cycle() -> list[dict]:
     print(f"\nChecking {len(SOURCES)} sources ({now_utc()})", flush=True)
     results = []
     for source in SOURCES:
-        results.append(check_source(source))
+        try:
+            results.append(check_source(source))
+        except Exception as exc:
+            print(f"{source['name']}: FAILED — {type(exc).__name__}: {exc}", flush=True)
         time.sleep(0.5)
     try:
         from transform_port_pegel import save, transform
-    except ModuleNotFoundError as exc:
-        if exc.name != "transform_port_pegel":
-            raise
-        print(
-            "Clean port data: SKIPPED — transform_port_pegel.py is missing; "
-            "source responses remain saved in data/.",
-            flush=True,
-        )
-        return results
 
-    try:
         clean_data = transform()
         saved_path = save(clean_data)
         print(f"Clean port data saved: {saved_path.relative_to(ROOT)}", flush=True)
+    except ModuleNotFoundError as exc:
+        if exc.name == "transform_port_pegel":
+            print(
+                "Clean port data: SKIPPED — transform_port_pegel.py is missing; "
+                "source responses remain saved in data/.",
+                flush=True,
+            )
+        else:
+            print(f"Clean port data: FAILED — {type(exc).__name__}: {exc}", flush=True)
     except (OSError, ValueError, KeyError, RuntimeError) as exc:
         print(f"Clean port data: FAILED — {exc}", flush=True)
+    except Exception as exc:
+        print(f"Clean port data: FAILED — {type(exc).__name__}: {exc}", flush=True)
     return results
 
 
@@ -420,7 +429,10 @@ def main() -> int:
             return 0
         print(f"Watching every {args.interval} seconds. Press Ctrl+C to stop.")
         while True:
-            run_cycle()
+            try:
+                run_cycle()
+            except Exception as exc:
+                print(f"Cycle: FAILED — {type(exc).__name__}: {exc}", flush=True)
             time.sleep(args.interval)
     except KeyboardInterrupt:
         print("\nStopped.")
