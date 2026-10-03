@@ -1,19 +1,23 @@
-import os
-from dotenv import load_dotenv
-from supabase import create_client
+"""Check collector table access without printing credentials or requiring an SDK."""
 
-# 1. Lädt die Umgebungsvariablen aus deiner .env Datei in dieses Skript
-load_dotenv()
+from supabase_ingest import SupabaseError, SupabaseIngestor, load_local_env
 
-# 2. Liest die spezifischen Keys aus, die wir für das Backend brauchen
-url = os.environ.get("SUPABASE_URL")
-key = os.environ.get("SUPABASE_SECRET_KEY")
 
-# 3. Baut die aktive Verbindung zu deinem Supabase-Projekt auf
-supabase = create_client(url, key)
+def main() -> int:
+    try:
+        load_local_env()
+        ingestor = SupabaseIngestor.from_environment()
+        if ingestor is None:
+            print("Set SUPABASE_URL and SUPABASE_SECRET_KEY in the local .env")
+            return 1
+        for table in ("data_sources", "fetch_runs", "observations"):
+            ingestor.client.request(table, query={"select": "id", "limit": 0})
+            print(f"Supabase {table}: OK")
+    except (SupabaseError, OSError, ValueError) as exc:
+        print(f"Connection check: FAILED — {exc}")
+        return 1
+    return 0
 
-# 4. Sendet einen Test-Befehl: "Wähle (*) aus 'sensor_readings', aber maximal 1 Zeile"
-response = supabase.table('sensor_readings').select("*").limit(1).execute()
 
-# 5. Gibt die Antwort der Datenbank im Terminal aus
-print("Datenbank antwortet:", response.data)
+if __name__ == "__main__":
+    raise SystemExit(main())

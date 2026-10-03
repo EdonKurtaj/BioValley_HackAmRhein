@@ -8,6 +8,8 @@ python3 pythontest/api_requester.py --once
 
 Without `--once`, the requester repeats every 600 seconds. Use `--interval` to change the interval.
 
+The collector automatically loads the project's local `.env` and writes to Supabase when `SUPABASE_URL` and `SUPABASE_SECRET_KEY` are configured. It uses only Python's standard library; no new packages are needed. Existing environment variables take priority. See [Supabase ingestion](../supabase/README.md) for table setup, mappings, and retry behavior. Use `--local-only` to fetch and archive without database writes.
+
 Unexpected source errors are logged with their exception type and message; polling continues with the remaining sources. Transformation errors are reported without ending the cycle. In watch mode, an unexpected cycle error is logged before waiting the configured interval and retrying. Ctrl+C stops the requester cleanly.
 
 Each source has a local folder under `pythontest/data/`:
@@ -27,4 +29,5 @@ Run the offline archive regression checks:
 python3 -m unittest discover -s pythontest -p 'test_api*.py' -v
 python3 -m unittest discover -s pythontest -p test_transform_port_pegel.py -v
 python3 -m unittest discover -s pythontest -p test_parse_swiss_number.py -v
+python3 -m unittest discover -s pythontest -p test_supabase_ingest.py -v
 ```

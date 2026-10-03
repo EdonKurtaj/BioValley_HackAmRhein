@@ -12,6 +12,7 @@ import transform_port_pegel
 
 class PollingResilienceTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch.object(api_requester, "create_ingestor", return_value=None))
         self.output = io.StringIO()
         self.enterContext(contextlib.redirect_stdout(self.output))
         self.enterContext(patch.object(transform_port_pegel, "transform", return_value={}))

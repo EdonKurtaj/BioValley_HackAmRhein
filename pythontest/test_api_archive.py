@@ -16,6 +16,7 @@ import transform_port_pegel
 
 class ApiArchiveTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch.object(api_requester, "create_ingestor", return_value=None))
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name)

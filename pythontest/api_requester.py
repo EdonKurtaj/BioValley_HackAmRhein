@@ -19,6 +19,8 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
+from interfaces import IngestionSink
+
 
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
@@ -219,6 +221,7 @@ def check_source(source: dict) -> dict:
         "rate_limited": rate_limited,
         "retry_after": headers.get("Retry-After") or headers.get("retry-after"),
         "response_bytes": len(body) if body is not None else None,
+        "source_last_modified": headers.get("Last-Modified") or headers.get("last-modified"),
         "error": transport_error or parse_error,
         "data": payload,
     }
@@ -339,14 +342,42 @@ def check_meteoswiss_current(source: dict) -> dict:
     return result
 
 
-def run_cycle() -> list[dict]:
+def create_ingestor(local_only: bool = False) -> IngestionSink | None:
+    if local_only:
+        return None
+    from supabase_ingest import SupabaseIngestor, load_local_env
+
+    load_local_env()
+    ingestor = SupabaseIngestor.from_environment()
+    if ingestor is None:
+        print("Supabase disabled — set SUPABASE_URL and SUPABASE_SECRET_KEY in .env", flush=True)
+    return ingestor
+
+
+def run_cycle(ingestor: IngestionSink | None = None) -> list[dict]:
     print(f"\nChecking {len(SOURCES)} sources ({now_utc()})", flush=True)
+    if ingestor is not None:
+        try:
+            ingestor.flush()
+        except Exception as exc:
+            print(f"Supabase retry: FAILED — {type(exc).__name__}: {exc}", flush=True)
     results = []
     for source in SOURCES:
         try:
-            results.append(check_source(source))
+            result = check_source(source)
+            results.append(result)
         except Exception as exc:
             print(f"{source['name']}: FAILED — {type(exc).__name__}: {exc}", flush=True)
+            result = {
+                "source_id": source["id"], "checked_at": now_utc(), "http_status": None,
+                "request_ok": False, "rate_limited": False, "retry_after": None,
+                "response_bytes": None, "error": f"{type(exc).__name__}: {exc}", "data": None,
+            }
+        if ingestor is not None:
+            try:
+                ingestor.ingest(source, result)
+            except Exception as exc:
+                print(f"Supabase {source['id']}: FAILED — {type(exc).__name__}: {exc}; local archives retained", flush=True)
         time.sleep(0.5)
     try:
         from transform_port_pegel import save, transform
@@ -373,18 +404,24 @@ def run_cycle() -> list[dict]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--once", action="store_true", help="run one cycle and exit")
+    parser.add_argument("--local-only", action="store_true", help="keep local archives without writing to Supabase")
     parser.add_argument("--interval", type=int, default=600, help="seconds between cycles in watch mode (default: 600)")
     args = parser.parse_args()
     if args.interval < 1:
         parser.error("--interval must be at least 1 second")
     try:
+        try:
+            ingestor = create_ingestor(args.local_only)
+        except (OSError, ValueError, RuntimeError) as exc:
+            print(f"Supabase disabled — {exc}; local collection continues", flush=True)
+            ingestor = None
         if args.once:
-            run_cycle()
+            run_cycle(ingestor)
             return 0
         print(f"Watching every {args.interval} seconds. Press Ctrl+C to stop.")
         while True:
             try:
-                run_cycle()
+                run_cycle(ingestor)
             except Exception as exc:
                 print(f"Cycle: FAILED — {type(exc).__name__}: {exc}", flush=True)
             time.sleep(args.interval)
