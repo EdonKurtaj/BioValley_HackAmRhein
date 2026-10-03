@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from risk_assessment.demo import _plans, _shipment, demo_fleet
+from risk_assessment.dashboard import demo_dashboard
 from risk_assessment.road_routes import ROAD_CACHE, edges, rank_routes, reroute_options, route_distance_km
 
 
@@ -66,6 +67,19 @@ class RoadRoutesTests(unittest.TestCase):
         closed_end = tuple(option["blocked_location"])
         closed = next(edge for edge in edges(plan.coordinates) if edge[1] == closed_end)
         self.assertNotIn(closed, edges(option["coordinates"]))
+
+    def test_reroute_keeps_its_trigger_visible_without_scoring_the_avoided_closure(self):
+        before = demo_dashboard(self.anchor, 0, "reroute")
+        after = demo_dashboard(self.anchor, 10, "reroute")
+        before_location = next(point for point in before["locations"] if point["id"] == "jam-BV-104")
+        after_location = next(point for point in after["locations"] if point["id"] == "jam-BV-104")
+        self.assertEqual(before_location["longitude"], after_location["longitude"])
+        self.assertEqual(before_location["latitude"], after_location["latitude"])
+        self.assertIn("Umfahrene Demo-Sperrung", after_location["name"])
+        self.assertEqual(after["signals"][1]["value"], 0)
+        self.assertIn("umfahren", after["signals"][1]["detail"])
+        self.assertEqual(after["shipments"][0]["score"]["components"]["route"], 0)
+        self.assertIn("45 min", after["shipments"][0]["routing"]["message"])
 
     def test_absent_alternative_keeps_primary_and_does_not_invent_a_reroute(self):
         with patch("risk_assessment.demo.reroute_options", return_value=None):

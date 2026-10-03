@@ -130,20 +130,28 @@ def demo_dashboard(anchor: datetime, elapsed_minutes=0, scenario="fleet") -> dic
     air = 40 if scenario == "heat" else 18.4 if scenario == "normal" else 35
     delays = [shipment for shipment in fleet["shipments"] if shipment["delayMinutes"] > 0 and shipment["status"] != "delivered"
               and not shipment["routing"]["rerouted"]]
-    alerts = [{"id": f"jam-{shipment['id']}", "title": f"Stau · {shipment['routeName']}",
-               "detail": f"Simulierte Verzögerung {shipment['delayMinutes']:g} min · {shipment['id']}",
-               "kind": "traffic", "observedAt": stamp, "freshness": "current"} for shipment in delays]
+    avoided = [shipment for shipment in fleet["shipments"] if shipment["routing"]["rerouted"]]
+    incidents = [*delays, *avoided]
+    alerts = [{"id": f"jam-{shipment['id']}",
+               "title": (f"Umfahrene Demo-Sperrung · {shipment['id']}" if shipment["routing"]["rerouted"] else
+                         f"Demo-Sperrung · {shipment['id']}" if shipment["routing"]["blockedLocation"] else
+                         f"Stau · {shipment['routeName']}"),
+               "detail": ("Simulierte Sperrung auf der ursprünglichen Route; Umleitung vermeidet den Abschnitt. Keine Live-Verkehrsmessung."
+                          if shipment["routing"]["rerouted"] else
+                          f"Simulierte Verzögerung {shipment['delayMinutes']:g} min · {shipment['id']}"),
+               "kind": "traffic", "observedAt": stamp, "freshness": "current"} for shipment in incidents]
     if air >= HOT_AMBIENT_ONSET_C:
         alerts.append({"id": "heat", "title": "Hohe Außentemperatur", "detail": "Simuliert · Kühlung und Umschlagfenster prüfen; Paketmessung bleibt separat.",
                        "kind": "weather", "observedAt": stamp, "freshness": "current"})
     locations = [*MAP_LOCATIONS, *[{"id": alert["id"], "name": alert["title"], "category": "traffic",
                                   "longitude": (shipment["routing"]["blockedLocation"] or shipment["route"][3])[0],
                                   "latitude": (shipment["routing"]["blockedLocation"] or shipment["route"][3])[1],
-                                  "description": alert["detail"]} for shipment, alert in zip(delays, alerts)]]
+                                  "description": alert["detail"]} for shipment, alert in zip(incidents, alerts)]]
     return {"mode": "demo", **fleet, "locations": locations, "alerts": alerts,
             "signals": [
                 _signal("temperature", "Lufttemperatur", air, "°C", stamp, "current", "Demo-Wetter", "Synthetisches Umgebungssignal", air >= HOT_AMBIENT_ONSET_C),
-                _signal("traffic", "Routenstörungen", len(delays), "Stau", stamp, "current", "Demo-Verkehr", "Explizit den Demo-LKW zugeordnet", bool(delays)),
+                _signal("traffic", "Aktive Routenstörungen", len(delays), "betroffene LKW", stamp, "current", "Demo-Verkehr",
+                        f"{len(avoided)} Demo-Sperrung(en) umfahren · siehe Kartenmarker" if avoided else "Explizit den Demo-LKW zugeordnet", bool(delays)),
                 _signal("gust", "Windböen", 12, "km/h", stamp, "current", "Demo-Wetter", "Synthetische Messung"),
                 _signal("rhine", "Rheinpegel", 479, "cm", stamp, "current", "Demo-Pegel", "Kontext · kein Einfluss auf Demo-LKW"),
             ], "sourceLabel": "OSRM-Straßenrouten · synthetische Messungen, GPS und Paketdaten", "transportSource": "Simulierte LKW-Flotte"}

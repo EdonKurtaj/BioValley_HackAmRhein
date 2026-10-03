@@ -13,11 +13,12 @@ Follow actual streets with MapLibre GL Directions and demonstrate a continuous t
 - Reroute scenario recommends an alternative then switches at five replay minutes, updating movement, ETA, slack and distance. Original path becomes dashed; missing alternatives keep the primary path.
 - MapLibre Directions subclass renders cached server-planned routes; truck animation follows street corners. Optional routing metadata lives in frontend/src/interfaces.ts.
 - Updated sources, design and run/demo instructions.
+- Keep the original simulated closure marker and incident visible after rerouting, labelled avoided; show the original 45-minute delay in route status. Active-route counts/scoring exclude the avoided section.
 - Made the rerouting truck explicit in the scenario selector (BV-104), with persistent route-status labels on its card, map and top of details; added Routenunterschied ansehen to focus the actual divergent streets.
 
 ## Verification
 
-- All 108 backend tests and 20 frontend tests pass; TypeScript, formatting, production build and documentation checks pass.
+- All 109 backend tests and 20 frontend tests pass; TypeScript, formatting, production build and documentation checks pass.
 - Browser checked: street paths render, reroute switches at five replay minutes with updated ETA, restart restores the primary path, and no console errors were reported.
 
 ## Next

@@ -118,8 +118,8 @@ def _shipment(plan: ShipmentPlan, anchor: datetime, elapsed_minutes: float, *, a
     score = calculate_priority_score(thermal, route)
     distance = route_distance_km(active_coordinates)
     routing_message = ("Qualitätshold · kein Routenwechsel" if thermal.quality_review_required else
-                       "Umleitung aktiv · gesperrten Demo-Abschnitt vermieden" if rerouted else
-                       "Alternative berechnet · Wechsel nach 5 Replay-Minuten" if option else
+                       f"Umleitung aktiv · Demo-Sperrung mit ursprünglich {plan.delay_minutes:g} min Verzögerung umfahren" if rerouted else
+                       f"Auslöser: Demo-Sperrung mit {plan.delay_minutes:g} min Verzögerung · Alternative früher · Wechsel nach 5 Replay-Minuten" if option else
                        "Keine verbundene Alternative verfügbar" if allow_reroute else
                        "Straßenroute · zwischengespeicherte OSRM-Geometrie")
     return {

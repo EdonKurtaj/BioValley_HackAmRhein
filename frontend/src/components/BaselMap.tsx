@@ -103,6 +103,10 @@ export function BaselMap({
       const existing = markers.current.get(location.id);
       if (existing) {
         existing.setLngLat([location.longitude, location.latitude]);
+        existing.getElement().setAttribute("aria-label", location.name);
+        const content = document.createElement("strong");
+        content.textContent = location.name;
+        existing.getPopup().setDOMContent(content);
         return;
       }
       const element = document.createElement("button");
@@ -272,6 +276,7 @@ export function BaselMap({
             Gemeinsame Straßen bleiben gleich; die Abzweigung liegt weiter auf
             der Route.
           </span>
+          <span>{selectedShipment.routing?.message}</span>
           <button
             type="button"
             className="text-button"
