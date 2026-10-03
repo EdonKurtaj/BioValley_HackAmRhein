@@ -17,7 +17,7 @@ All checks used `lang=en`, `offset=0`, and `order_by=-timestamp`. Example [rejec
 
 The saved 48 rows span 2026-10-03 05:15 to 09:10 UTC. At a five-minute cadence, 48 samples cover approximately four hours; the interval between the oldest and newest sample is 47 × 5 minutes = 3 hours 55 minutes. Missing observations can change that span; use the actual timestamps when calculating rates.
 
-The live acceptance check confirmed `len(latest["data"]["results"]) == 48` in `pythontest/data/basel_dataset_100089/latest.json`.
+The earlier live acceptance check confirmed 48 results in the collector's local dataset-100089 snapshot. That generated archive is not checked into the repository; current assessment reads saved Supabase observations.
 
 ## Traffic — dataset 100006
 

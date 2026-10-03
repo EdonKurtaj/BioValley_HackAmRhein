@@ -18,4 +18,12 @@
   --sun-ink: #9b7831;
   --shadow: 0 6px 24px #173e3712;
   --radius: 18px;
+  --warning: #fbf1d9;
+  --warning-ink: #9a661e;
+  --danger: #fbece8;
+  --danger-ink: #a34332;
+  --chart-band: #e6f0e1;
+  --marker-outline: #ffffff;
+  --font-small: 11px;
+  --font-body: 13px;
 }

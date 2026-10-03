@@ -1,54 +1,126 @@
-import { useEffect, useState } from "react";
+import { RegionalSignals, RegionalAlerts } from "./components/RegionalPanels";
+import { TransportSidebar } from "./components/TransportSidebar";
+import { ReplayControls } from "./components/ReplayControls";
+import { useEffect, useRef, useState } from "react";
 import { BaselMap } from "./components/BaselMap";
-import { categories } from "./config/map";
-import { mapDataSource } from "./data/mapData";
-import type { MapLocation, MapSnapshot } from "./interfaces";
-
-const emptyLocations: MapLocation[] = [];
+import { ShipmentDetails, timeLabel } from "./components/ShipmentDetails";
+import { loadDashboard } from "./data/dashboardData";
+import {
+  DASHBOARD_POLL_MS,
+  LIVE_POLL_MS,
+  API_TIMEOUT_MS,
+} from "./config/dashboard";
+import type { DashboardSnapshot, DemoScenario, FeedMode } from "./interfaces";
 
 export default function App() {
-  const [snapshot, setSnapshot] = useState<MapSnapshot | null>(null);
+  const [mode, setMode] = useState<FeedMode>("demo");
+  const [scenario, setScenario] = useState<DemoScenario>("fleet");
+  const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [attempt, setAttempt] = useState(0);
-  const [filter, setFilter] = useState("all");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const [anchor, setAnchor] = useState(() => new Date().toISOString());
+  const elapsed = useRef(0);
+  const [selectedId, setSelectedId] = useState<string | null>("BV-104");
+  const [selectedLocationId, setSelectedLocationId] = useState<string | null>(
+    null,
+  );
   const [resetKey, setResetKey] = useState(0);
+  const [filter, setFilter] = useState("all");
+
   useEffect(() => {
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 12000);
     let active = true;
+    let timer: number;
+    let controller: AbortController;
     setLoading(true);
+    setSnapshot(null);
     setError("");
-    mapDataSource
-      .load(controller.signal)
-      .then((data) => {
-        if (active) setSnapshot(data);
-      })
-      .catch((reason) => {
+    async function refresh() {
+      controller = new AbortController();
+      const timeout = window.setTimeout(
+        () => controller.abort(),
+        API_TIMEOUT_MS,
+      );
+      try {
+        const data = await loadDashboard(
+          mode,
+          scenario,
+          elapsed.current,
+          anchor,
+          controller.signal,
+        );
+        if (active) {
+          setSnapshot(data);
+          setError("");
+        }
+      } catch (reason) {
         if (active)
           setError(
-            reason.name === "AbortError"
-              ? "Die Datenquelle antwortet nicht. Bitte erneut versuchen."
-              : reason.message || "Datenquelle nicht erreichbar.",
+            reason instanceof Error && reason.name !== "AbortError"
+              ? reason.message
+              : "Die Datenquelle antwortet nicht. Bitte erneut versuchen.",
           );
-      })
-      .finally(() => {
+      } finally {
         window.clearTimeout(timeout);
-        if (active) setLoading(false);
-      });
+        if (active) {
+          setLoading(false);
+          timer = window.setTimeout(
+            refresh,
+            mode === "demo" ? DASHBOARD_POLL_MS : LIVE_POLL_MS,
+          );
+        }
+      }
+    }
+    void refresh();
     return () => {
       active = false;
-      window.clearTimeout(timeout);
-      controller.abort();
+      window.clearTimeout(timer);
+      controller?.abort();
     };
-  }, [attempt]);
-  const locations = snapshot?.locations ?? emptyLocations;
-  const visible =
-    filter === "all"
-      ? locations
-      : locations.filter((location) => location.category === filter);
-  const selected = locations.find((location) => location.id === selectedId);
+  }, [mode, scenario, anchor, attempt]);
+
+  useEffect(() => {
+    if (!playing || mode !== "demo" || !snapshot || error) return;
+    const timer = window.setInterval(() => {
+      elapsed.current = Math.min(
+        snapshot.simulation?.maximumMinutes ?? 180,
+        elapsed.current + (snapshot.simulation?.minutesPerSecond ?? 1),
+      );
+      if (elapsed.current >= (snapshot.simulation?.maximumMinutes ?? 180))
+        setPlaying(false);
+    }, DASHBOARD_POLL_MS);
+    return () => window.clearInterval(timer);
+    // Replay timing uses a ref so requests are serial rather than aborted every second.
+  }, [playing, mode, !!snapshot, error]);
+
+  function restart(nextScenario = scenario) {
+    elapsed.current = 0;
+    setAnchor(new Date().toISOString());
+    setScenario(nextScenario);
+    setSelectedId("BV-104");
+    setSelectedLocationId(null);
+  }
+
+  function switchMode(next: FeedMode) {
+    if (next === mode) return;
+    setSnapshot(null);
+    setSelectedLocationId(null);
+    setMode(next);
+  }
+
+  const shipments = snapshot?.shipments ?? [];
+  const selected = shipments.find((shipment) => shipment.id === selectedId);
+  const locations = snapshot?.locations ?? [];
+  const selectedLocation = locations.find(
+    (location) => location.id === selectedLocationId,
+  );
+  const activeShipments = shipments.filter(
+    (shipment) => shipment.status !== "delivered",
+  );
+  const needsAttention = activeShipments.filter(
+    (shipment) => shipment.action !== "normal",
+  ).length;
 
   return (
     <div className="app-shell">
@@ -58,174 +130,159 @@ export default function App() {
             b<span>v</span>
           </span>
           <span>
-            BioValley<small>REGIONAL INTELLIGENCE</small>
+            BioValley<small>LOGISTICS INTELLIGENCE</small>
           </span>
         </a>
         <span className="header-section">
-          Region Basel <span className="slash">/</span> Übersicht
+          Region Basel <span className="slash">/</span> Transportleitstand
         </span>
         <span className="prototype">
           <i />
           Prototyp
         </span>
       </header>
-      <main>
+      <main className="dashboard-main">
         <div className="page-heading">
           <div>
-            <p className="eyebrow">DIE REGION IM BLICK</p>
-            <h1>Basel. Alles auf einer Karte.</h1>
+            <p className="eyebrow">KÜHLKETTE & LOGISTIK</p>
+            <h1>Lieferungen im Blick.</h1>
             <p className="subtitle">
-              Rhein, Logistik und Wetter – der Ausgangspunkt für eure regionale
-              Übersicht.
+              Messwerte einordnen. Engpässe erkennen. Die nächste Maßnahme
+              verstehen.
             </p>
           </div>
-          <span className="region-tag">
-            CH <span>Basel & Umgebung</span>
-          </span>
-        </div>
-        <div className="workspace">
-          <aside className="sidebar">
-            <div className="sidebar-heading">
-              <p className="eyebrow">ENTDECKEN</p>
-              <h2>
-                Standorte{" "}
-                <span>{locations.length.toString().padStart(2, "0")}</span>
-              </h2>
-              <p>Wähle einen Standort für mehr Kontext.</p>
-            </div>
-            <div className="filters" aria-label="Standorte filtern">
-              {[
-                ["all", "Alle"],
-                ...Object.entries(categories).map(([key, value]) => [
-                  key,
-                  value.label,
-                ]),
-              ].map(([key, label]) => (
+          <div className="feed-control">
+            <div className="feed-switch" aria-label="Datenmodus">
+              {(["demo", "live"] as const).map((feed) => (
                 <button
-                  key={key}
-                  aria-pressed={filter === key}
-                  className={filter === key ? "active" : ""}
-                  onClick={() => {
-                    setFilter(key);
-                    setSelectedId(null);
-                  }}
+                  key={feed}
+                  aria-pressed={mode === feed}
+                  className={mode === feed ? "active" : ""}
+                  onClick={() => switchMode(feed)}
                 >
-                  {label}
+                  {feed === "demo" ? "◈ Demo-Feed" : "● Live-Feed"}
                 </button>
               ))}
             </div>
-            <div className="location-list" aria-live="polite">
-              {loading ? (
-                <p className="state-message">Standorte werden geladen …</p>
-              ) : error ? (
-                <div className="state-message" role="alert">
-                  <p>{error}</p>
-                  <button
-                    className="text-button"
-                    onClick={() => setAttempt(attempt + 1)}
-                  >
-                    Erneut versuchen ↗
-                  </button>
-                </div>
-              ) : visible.length === 0 ? (
-                <p className="state-message">
-                  Keine Standorte in dieser Auswahl.
-                </p>
-              ) : (
-                visible.map((location) => (
-                  <button
-                    key={location.id}
-                    className={`location-card ${selectedId === location.id ? "selected" : ""}`}
-                    aria-pressed={selectedId === location.id}
-                    onClick={() => setSelectedId(location.id)}
-                  >
-                    <span
-                      className={`location-symbol pin-${location.category}`}
-                    >
-                      {categories[location.category].symbol}
-                    </span>
-                    <span>
-                      <small>{categories[location.category].label}</small>
-                      <strong>{location.name}</strong>
-                      <span className="location-caption">
-                        Auf der Karte ansehen
-                      </span>
-                    </span>
-                    <span className="arrow">↗</span>
-                  </button>
-                ))
-              )}
-            </div>
-            <div className="data-note">
-              <span className="note-icon">ⓘ</span>
-              <div>
-                <strong>
-                  {snapshot?.mode === "live"
-                    ? "Verbundene Datenquelle"
-                    : "Eine erste Orientierung"}
-                </strong>
-                <p>
-                  {snapshot?.mode === "live"
-                    ? "Die Standorte werden von der verbundenen Datenquelle bereitgestellt."
-                    : "Beispielstandorte, keine Live-Messwerte. Die Positionen dienen der Orientierung."}
-                </p>
-                {snapshot?.updatedAt && (
-                  <small>
-                    Stand:{" "}
-                    {new Date(snapshot.updatedAt).toLocaleString("de-CH")}
-                  </small>
-                )}
-              </div>
-            </div>
-          </aside>
-          <section className="map-panel" aria-label="Basel Karte">
+            <small>
+              {mode === "demo"
+                ? "Alle Transport- und Messdaten sind simuliert"
+                : "Messungen aus Supabase · Zeitstempel beachten"}
+            </small>
+          </div>
+        </div>
+        <div className={`provenance-banner ${mode}`} role="status">
+          <span>
+            <strong>{mode === "demo" ? "DEMO" : "LIVE"}</strong>{" "}
+            {snapshot?.sourceLabel ??
+              (mode === "demo"
+                ? "Synthetische Flotte wird geladen"
+                : "Supabase-Beobachtungen werden geladen")}
+          </span>
+          <span>
+            {snapshot?.updatedAt
+              ? `${mode === "demo" ? "Simulationszeit" : "Abruf"}: ${timeLabel(snapshot.updatedAt, true)}`
+              : "Verbindung wird hergestellt …"}
+          </span>
+        </div>
+        {error && (
+          <div className="connection-error" role="alert">
+            <span>
+              {error}
+              {snapshot
+                ? " Angezeigte Daten stammen aus dem letzten erfolgreichen Abruf."
+                : ""}
+            </span>
+            <button
+              className="text-button"
+              onClick={() => setAttempt(attempt + 1)}
+            >
+              Erneut versuchen ↗
+            </button>
+          </div>
+        )}
+        <RegionalSignals signals={snapshot?.signals} loading={loading} />
+        <ReplayControls
+          mode={mode}
+          activeCount={activeShipments.length}
+          needsAttention={needsAttention}
+          scenario={scenario}
+          onScenario={restart}
+          playing={playing}
+          onPlay={() => setPlaying(!playing)}
+          onRestart={() => restart()}
+          canPlay={!!snapshot && !error}
+        />
+        <div className="operations-layout">
+          <TransportSidebar
+            shipments={shipments}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            filter={filter}
+            onFilter={setFilter}
+            mode={mode}
+            loading={loading}
+            transportSource={snapshot?.transportSource}
+          />
+          <section className="map-panel" aria-label="Basel Transportkarte">
             <BaselMap
-              locations={visible}
-              selectedId={selectedId}
-              onSelect={setSelectedId}
+              locations={locations}
+              selectedId={selectedLocationId}
+              onSelect={setSelectedLocationId}
               resetKey={resetKey}
+              shipments={shipments}
+              selectedShipmentId={selectedId}
+              onSelectShipment={setSelectedId}
             />
             <div className="map-heading">
               <span className="map-label">
-                <i /> BASEL, SCHWEIZ
+                <i /> BASEL & ANFAHRTSROUTEN
               </span>
               <button
                 className="reset-button"
                 onClick={() => {
-                  setSelectedId(null);
                   setResetKey(resetKey + 1);
+                  setSelectedLocationId(null);
                 }}
               >
-                ⌖ <span>Basel zentrieren</span>
+                ⌖ Übersicht
               </button>
             </div>
-            {selected && (
+            {selectedLocation && (
               <div className="detail-card">
                 <button
                   className="close-button"
-                  aria-label="Standortdetails schliessen"
-                  onClick={() => setSelectedId(null)}
+                  aria-label="Standortdetails schließen"
+                  onClick={() => setSelectedLocationId(null)}
                 >
                   ×
                 </button>
-                <p className="eyebrow">{categories[selected.category].label}</p>
-                <h3>{selected.name}</h3>
-                <p>{selected.description}</p>
+                <p className="eyebrow">REGIONALER KONTEXT</p>
+                <h3>{selectedLocation.name}</h3>
+                <p>{selectedLocation.description}</p>
               </div>
             )}
             <div className="map-badge">
-              {snapshot?.mode === "live"
-                ? "Verbundene Standorte"
-                : "Beispielstandorte"}
-              <span>•</span> OpenStreetMap
+              {mode === "demo"
+                ? "Demo-LKW · illustrative Routen"
+                : "Regionale Beobachtungen · kein GPS"}
+              <span>•</span>OpenStreetMap
             </div>
           </section>
+          <ShipmentDetails shipment={selected} />
         </div>
+        <RegionalAlerts
+          alerts={snapshot?.alerts}
+          mode={mode}
+          loading={loading}
+          hasData={!!snapshot}
+        />
         <footer>
+          <span>BioValley · HackAmRhein 2026</span>
           <span>
-            BioValley <span className="footer-dot">·</span> HackAmRhein 2026
+            Planungsempfehlungen · keine automatische Disposition oder
+            Produktfreigabe
           </span>
-          <span>Eine Region. Viele Verbindungen.</span>
         </footer>
       </main>
     </div>

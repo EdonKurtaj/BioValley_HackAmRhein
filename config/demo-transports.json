@@ -1,0 +1,37 @@
+{
+  "simulation_minutes_per_second": 1,
+  "maximum_replay_minutes": 180,
+  "buffers_hours": { "standard": 1, "high": 2, "critical": 4 },
+  "sensor_accuracy_c": 0.1,
+  "shipments": [
+    {
+      "id": "BV-104", "name": "Kühltransport 104", "material": "Kritisches Reagenz · Demo", "priority": "critical",
+      "origin": "Pratteln Logistik-Hub", "destination": "Basel Produktionslager", "route_name": "A2 · Hagnau · Basel",
+      "coordinates": [[7.6900,47.5240],[7.6830,47.5320],[7.6620,47.5350],[7.6410,47.5370],[7.6280,47.5390],[7.6160,47.5410],[7.6080,47.5510],[7.6050,47.5610],[7.6060,47.5700],[7.6090,47.5750]],
+      "travel_minutes": 55, "initial_elapsed_minutes": 25, "need_after_departure_minutes": 110,
+      "delay_minutes": 45, "jam_fraction": 0.35, "start_c": 5, "ambient_c": 5, "tau_minutes": 90,
+      "alternate_coordinates": [[7.6900,47.5240],[7.6670,47.5220],[7.6430,47.5220],[7.6150,47.5230],[7.6000,47.5350],[7.5850,47.5450],[7.5840,47.5630],[7.5970,47.5710],[7.6090,47.5750]]
+    },
+    {
+      "id": "BV-208", "name": "Kühltransport 208", "material": "Pufferlösung · Demo", "priority": "standard",
+      "origin": "Rheinfelden Depot", "destination": "Pratteln Umschlag", "route_name": "A3 · Augst · Pratteln",
+      "coordinates": [[7.7830,47.5490],[7.7780,47.5430],[7.7660,47.5370],[7.7490,47.5330],[7.7280,47.5300],[7.7100,47.5310],[7.6930,47.5310],[7.6850,47.5260]],
+      "travel_minutes": 45, "initial_elapsed_minutes": 12, "need_after_departure_minutes": 400,
+      "delay_minutes": 0, "jam_fraction": 0.4, "start_c": 5, "ambient_c": 5, "tau_minutes": 90
+    },
+    {
+      "id": "BV-312", "name": "Kühltransport 312", "material": "Prozessmaterial · Demo", "priority": "high",
+      "origin": "Muttenz Materiallager", "destination": "Allschwil Laborcampus", "route_name": "Muttenz · Bruderholz · Allschwil",
+      "coordinates": [[7.6470,47.5220],[7.6360,47.5260],[7.6190,47.5270],[7.6020,47.5290],[7.5900,47.5310],[7.5740,47.5370],[7.5580,47.5450],[7.5460,47.5530],[7.5330,47.5550]],
+      "travel_minutes": 50, "initial_elapsed_minutes": 22, "need_after_departure_minutes": 420,
+      "delay_minutes": 20, "jam_fraction": 0.4, "start_c": 5.5, "ambient_c": 5.5, "tau_minutes": 90
+    },
+    {
+      "id": "BV-416", "name": "Kühltransport 416", "material": "Temperaturempfindlicher Ansatz · Demo", "priority": "high",
+      "origin": "Birsfelden Kühlzentrum", "destination": "Basel Qualitätslager", "route_name": "Birsfelden · St. Jakob · Basel",
+      "coordinates": [[7.6260,47.5500],[7.6230,47.5450],[7.6160,47.5410],[7.6090,47.5430],[7.6010,47.5490],[7.5950,47.5520],[7.5880,47.5540],[7.5800,47.5600]],
+      "travel_minutes": 40, "initial_elapsed_minutes": 8, "need_after_departure_minutes": 360,
+      "delay_minutes": 0, "jam_fraction": 0.4, "start_c": 7, "ambient_c": 40, "tau_minutes": 90
+    }
+  ]
+}
