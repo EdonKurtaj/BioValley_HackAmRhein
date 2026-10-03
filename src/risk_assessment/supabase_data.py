@@ -236,13 +236,14 @@ def fetch_supabase_sources(project_root: Path = PROJECT_ROOT) -> dict:
 
     port_id = "port_pegel_current"
     port_run = _latest_run(url, key, port_id)
-    port_rows = []
-    if port_run:
-        port_rows = _get_json(url, key, "observations", {
-            "select": "station_id,station_name,observed_at,metric,value,unit,raw_record,fetch_run_id",
-            "source_id": f"eq.{port_id}", "fetch_run_id": f"eq.{port_run['id']}",
-            "order": "observed_at.desc", "limit": "500",
-        })
+    # A successful HTTP fetch can have failed normalization or observation
+    # delivery. Read the gauge's stored measurement independently of that run.
+    port_rows = _get_json(url, key, "observations", {
+        "select": "station_id,station_name,observed_at,metric,value,unit,raw_record,fetch_run_id",
+        "source_id": f"eq.{port_id}", "station_id": "eq.Basel-Rheinhalle",
+        "metric": "eq.water_level", "value": "not.is.null", "observed_at": "not.is.null",
+        "order": "observed_at.desc", "limit": "1",
+    })
     if not isinstance(port_rows, list):
         raise ValueError("Supabase port observations response must be a list")
     current_readings = []
