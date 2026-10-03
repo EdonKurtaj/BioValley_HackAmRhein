@@ -70,6 +70,39 @@ For a reviewed event, use `--road-event 'EVENT_ID|restricted|SOURCE_UPDATED_AT'`
 
 The terminal now reports the known score contribution and a range for missing evidence. See [calculation, applicability and limits](docs/risk-assessment.md#opentransportdata-road-evidence). Missing shipment route information remains unknown; no route or ETA is invented.
 
+## React map frontend
+
+Use Node.js 22.12+ or 24 LTS and npm. From the repository folder:
+
+```sh
+cd frontend
+npm ci
+npm run dev
+```
+
+Open the local URL printed by Vite. No backend or database credentials are needed for the default demo. Internet access is needed for OpenStreetMap tiles.
+
+```sh
+npm test
+npm run lint
+npm run build
+npm run preview
+```
+
+`npm run format` formats the frontend. `npm test` checks TypeScript contracts and API boundary validation. The production output is generated in `frontend/dist/`.
+
+### Connect a backend
+
+The single shared map contract is [frontend/src/interfaces.ts](frontend/src/interfaces.ts); HTTP response validation and demo data live in [the adapter](frontend/src/data/mapData.ts). Serve `GET /map` under your API base URL using that JSON contract. Then create a local `frontend/.env`:
+
+```dotenv
+VITE_API_BASE_URL=http://localhost:8000/api
+```
+
+Restart Vite after changing it. The frontend requests `http://localhost:8000/api/map`. For a separate origin, the backend must allow the frontend origin through CORS. All `VITE_` values are public browser configuration: never use credentials here. For deployment, supply the API URL when building and use HTTPS or a same-origin `/api` reverse proxy. Keep backend responses compatible with the contract to avoid UI changes.
+
+Backend failures remain visible with a retry action. The map itself stays available even if the location API is unavailable. The existing [Python requester and database setup](supabase/README.md) remain independent; connecting their results to the map endpoint is a future task.
+
 ## Data sources
 
 See [docs/SOURCES.md](docs/SOURCES.md).
@@ -80,4 +113,4 @@ Scenario package temperatures are simulated. Saved local weather is a regional o
 
 ## Team
 
-GitHub usernames.
+See [TEAM.md](TEAM.md) for GitHub usernames and working agreements.
