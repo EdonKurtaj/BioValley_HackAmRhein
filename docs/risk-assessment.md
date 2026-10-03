@@ -1,0 +1,137 @@
+# Risk assessment model for refrigerated biopharma shipments
+
+## Purpose and limits
+
+This is a transparent prototype model for a critical, generic reagent/intermediate with a required handling band of **2–8 °C**. It estimates (1) thermal exposure of the shipment and (2) operational risk that logistics disruption makes the material late. These are different risks and should be displayed separately. The model supports planning and escalation; it does not decide product quality or replace a qualified cold-chain process.
+
+The challenge does not name a product, packaging system, allowable excursion duration, stability curve, or approved route. Therefore, there is no scientifically defensible way to convert an excursion into a probability of degradation or a “safe time out of range.” Quality disposition must remain **review required** whenever the simulated/observed package sensor crosses 2–8 °C or its record is incomplete. WHO guidance supports transport monitoring and route profiling, but actual acceptance limits must come from the product owner/manufacturer and qualified packaging data. See [WHO TRS 961 Annex 9](https://www.who.int/publications/m/item/trs961-annex9) and [WHO TRS 992 Annex 5, Supplement 14](https://cdn.who.int/media/docs/default-source/medicines/norms-and-standards/guidelines/distribution/trs992-annex5.pdf).
+
+## Inputs and what each can establish
+
+| Input | Available fields in the saved sample | What it can tell us | What it cannot establish |
+|---|---|---|---|
+| MeteoSwiss Basel/Binningen current observations | Air temperature, 10-minute precipitation, radiation, sunshine, wind/gust, humidity/dew point, observation time | Ambient conditions near Basel at the station and time of observation; weather context for a simulated exposed transfer | Temperature inside the box or along the whole route; future conditions. Use observed measurements only, no forecast. |
+| Basel-Stadt traffic dataset 100006 | Hourly counts by site, direction and lane; vehicle categories such as `pw`, `lief`, `lw`, `sattelzug`, `bus` | Whether observed counts at a selected corridor counter are unusual versus that same counter’s normal pattern | Congestion or vehicle travel time on its own. It is motorized-individual-traffic counting; category coverage varies by site. |
+| Basel-Stadt Rhine dataset 100089 | Five-minute water level, level above sea level, discharge | Current local hydrology and rate/direction of change. Dataset is at Kleinbasel near the Birs inflow; its gauge convention is documented by Basel-Stadt. | A route closure unless paired with the official navigation threshold and the shipment’s actual Rhine leg. |
+| Port of Switzerland current gauge page | Basel-Rheinhalle and harbour gauge, bridge clearance, Rhine water temperature; official flood marks | Operational river-navigation restrictions when the shipment’s ship leg uses the affected stretch | Truck route delay or product temperature. |
+| Simulated shipment telemetry (later implementation) | Box sensor temperature/time; truck/ship location, route, status, ETA; loading/unloading and door-open intervals | Package thermal history and route-specific dwell/delay for the simulated shipment | Product quality disposition without product-specific stability and excursion rules. |
+
+The saved requester samples are snapshots, not a representative historical baseline. Traffic currently returns only ten newest records, and the samples do not yet provide a route trace or package sensor history. Any historical comparison must first retrieve and retain a suitable time series.
+
+## Calculation
+
+### 1. Package temperature: measured first, modelled only for scenarios
+
+When the simulated embedded sensor is available, use its readings as the primary thermal input. Store timestamp, measured temperature, sensor accuracy/quality, and missing-data flags. Calculate and report, separately for hot and cold excursions:
+
+```text
+minutes_above_8 = sum(interval duration where T_box > 8 °C)
+minutes_below_2 = sum(interval duration where T_box < 2 °C)
+peak_above_8   = max(T_box - 8 °C, 0)
+peak_below_2   = max(2 °C - T_box, 0)
+hot_degree_hours  = Σ max(T_box_i - 8 °C, 0) × Δt_hours
+cold_degree_hours = Σ max(2 °C - T_box_i, 0) × Δt_hours
+```
+
+Use the time-weighted trapezoid between readings for degree-hours if the sensor interval is irregular. Report sensor resolution/accuracy and gaps alongside the result. A reading exactly at 2 or 8 °C is within the stated band; show measurement uncertainty near either boundary as “borderline / check sensor accuracy,” not as a proven excursion.
+
+For a scenario before telemetry exists, use a first-order package thermal response as an *illustration*, not an excursion verdict:
+
+```text
+T_box(t + Δt) = T_air + (T_box(t) - T_air) × exp(-Δt / τ)
+```
+
+`τ` is the thermal time constant of the specific qualified package/load/airflow arrangement. It is unknown for this generic challenge. Expose it as a user-adjustable sensitivity parameter (fast, medium, slow response) and label the resulting temperature as **simulated**. Include sun/radiation and door-open handling only as scenario modifiers once the model can represent them; do not silently fold them into air temperature.
+
+For constant ambient temperature, the estimated time to a limit gives the intuitive starting-temperature effect:
+
+```text
+Hot case, T_air > 8 °C: t_to_8 = τ × ln((T_air - T_start) / (T_air - 8 °C))
+Cold case, T_air < 2 °C: t_to_2 = τ × ln((T_start - T_air) / (2 °C - T_air))
+```
+
+Thus a package starting at 7 °C reaches the upper boundary sooner than the same package starting at 2 °C during a hot exposure. In cold ambient conditions, a package starting at 2 °C has no lower-bound margin and reaches below 2 °C sooner than a warmer package. Compare a **2 °C / midpoint 5 °C / 7 °C** start in the demo. Do not claim that 2 °C is generally safer: it trades heat margin for freeze/cold margin.
+
+### 2. Weather: link observations to the shipment’s place and time
+
+Join the latest observed weather to a simulated transfer only when location/time are reasonably close. MeteoSwiss BAS is a regional outdoor station, not the loading dock or truck. Use:
+
+- Air temperature for a hot/cold ambient scenario during a known exposed interval.
+- Precipitation for wet-handling context only when a tracked stop/load is outdoors. Rain alone does not imply temperature damage; an enclosed, controlled box stays governed by its sensor.
+- Global radiation/sunshine for potential solar loading if a package is outdoors/in an unshaded vehicle. Do not add a thermal penalty to an insulated/closed package without calibration.
+- Wind/gust for exposed loading operations or disruption context if a supported relationship is defined.
+- Humidity/dew point only for exposed packaging/condensation context, not as a cold-chain excursion score.
+
+Missing values remain unknown, never zero. The current saved BAS sample has 17.1 °C, 0 mm precipitation over the latest 10 minutes, and 420 W/m² global radiation (observed at 11:20 local on 2026-10-03; fetched about 18 minutes later). This describes a dry current station observation; it says nothing about a shipment’s box temperature.
+
+### 3. Traffic: anomaly signal, then ETA from tracking
+
+Map only route-matched counter locations to the shipment’s simulated truck path. For each site/direction/lane (or a clearly defined site aggregation), build a baseline from historical counts for the same day-of-week and hour. Use median and median absolute deviation (MAD), or an empirical percentile, so a few incidents do not distort “normal”:
+
+```text
+traffic_anomaly = (observed_count - baseline_median) / max(1.4826 × MAD, minimum_scale)
+```
+
+Keep total count and relevant heavy/commercial categories as separate context features; validate each site’s class coverage and metadata first. A high count is **unusual traffic volume**, not proof of congestion. With simulated GPS, use route progress/observed speed or simulated ETA to calculate delay against the planned ETA. Use traffic anomaly to explain/warn; use delay/remaining slack to decide urgency.
+
+Basel-Stadt’s dataset describes motorized-individual-traffic counts and notes that full class data can be obtained in downloadable files; the current requester’s 10-row sample is not enough for a baseline. Collect several weeks (ideally seasonal coverage where feasible), retain site/direction/time, and handle the daylight-saving duplicated/missing hour as documented in the dataset.
+
+### 4. Rhine: only affect a shipment with a ship leg
+
+For a simulated ship leg, pair local river measurements with Port of Switzerland navigation information. Basel-Stadt dataset 100089 reports water level and discharge at Kleinbasel near the Birs inflow; the Port’s Basel-Rheinhalle gauge is the operational reference for the published high-water marks. Do not compare the gauges as if they were identical without an explicit conversion.
+
+For high water, use the Port’s published status logic: 700 cm is a pre-alert; 790 cm closes large-vessel traffic between Basel/Mittlere Brücke and Birsfelden and certain small craft/ferry operations; 820 cm closes navigation between Rheinfelden and Kembs. Apply a restriction only if the shipment’s simulated ship leg intersects that stretch. These marks do not imply a truck delay.
+
+Low water can constrain Rhine freight through reduced vessel loading/capacity and slower movement, but the present data and generic scenario do not define a universal low-water cutoff. For the demo, show the current level/discharge and classify low-water anomaly only against a longer season-matched local baseline, or against a vessel/operator draft threshold once available. Do not invent a hard threshold. A river restriction, rainfall-driven change, and resulting ship delay are one route consequence; do not add them as three independent risk penalties.
+
+The current saved readings are around 479 cm at the Basel-Stadt gauge and 470 cm at Basel-Rheinhalle (separate gauges/timestamps), well below the Port’s 700 cm high-water pre-alert. This is a sample snapshot, not a general “normal” threshold and not evidence about low-water vessel capacity.
+
+### 5. Logistics urgency and action
+
+Calculate remaining production slack from shipment tracking and the required manufacturing time:
+
+```text
+slack_hours = time_until_material_is_needed - estimated_time_until_controlled_receipt
+```
+
+Use a demo configuration for the buffer threshold (for example, a few hours chosen for the storyboard); clearly label it as a scenario assumption until the factory supplies a real deadline and operating buffer. Base `Buffer`/`Expedite` primarily on route ETA/slack, and base `Reroute` on a known route restriction plus a feasible alternate route and ETA. Do not derive actual minutes of truck delay from counts alone.
+
+Recommended decision order:
+
+1. **Quality review / quarantine:** measured or simulated package sensor is outside 2–8 °C, or sensor history is missing/uncertain. This means hold for qualified review; the model does not conclude product is damaged.
+2. **Reroute:** current route is closed/restricted or has a simulated disruption, and an alternate route is available with lower risk and acceptable ETA.
+3. **Expedite:** thermal history remains in range but ETA consumes the configured production slack; prioritize the shipment/receiving operation.
+4. **Buffer:** a disruption is plausible but there is enough slack; keep the material in controlled storage and avoid unnecessary handling.
+5. **Normal:** no relevant route trigger, package reading within range, telemetry current, and sufficient slack.
+
+Display thermal exposure, route status, slack, and chosen action as distinct, explainable fields. Avoid a single opaque 0–100 score. If the UI requires a headline level, use a deterministic status label and show which measurable condition triggered it. A future probabilistic score would require historical shipment outcomes and validation data that are not available now.
+
+## Demo cases to prove the logic
+
+1. **Hot loading delay:** 40 °C outside; package starts at 2 °C, 5 °C, or 7 °C; vary outdoor handling duration and package `τ`. Show predicted package curve as illustrative only. The 7 °C case approaches 8 °C first. Compare the same transfer with the box kept controlled/closed.
+2. **Cold exposure:** ambient below 2 °C; compare start at 2 °C with 5 °C and 7 °C. Show the 2 °C case has the least lower-bound margin. Flag any sensor below 2 °C for quality review.
+3. **Rain at unloading:** positive precipitation overlaps an outdoor tracked loading stop. Explain wet-handling/packaging concern separately; do not mark a thermal excursion unless the package sensor/model supports it.
+4. **Traffic spike:** route-matched counter shows an unusual count for that weekday/hour and simulated ETA shows reduced slack. Recommend buffer or expedite based on slack; reroute only if an alternate route is represented.
+5. **High Rhine:** ship leg intersects the affected section and Port status reaches a relevant mark. Recommend reroute/expedite only if feasible alternatives and schedule slack support it; otherwise report route disruption and supply risk.
+6. **No evidence / stale feed:** missing weather, sensor gap, old telemetry, or a non-route river/traffic signal produces “unknown/monitor,” not a fabricated penalty.
+
+## Evidence to collect next
+
+Prioritize official/primary material over generic papers:
+
+1. WHO TRS 961 Annex 9 (provided) and TRS 992 Annex 5 Supplements 13–15: route profiling, shipping-container qualification, and transport temperature-monitoring systems.
+2. WHO TRS 1025 Annex 7, Good storage and distribution practices for medical products, for current distribution-quality framing.
+3. Basel-Stadt metadata/codebooks for traffic dataset 100006 (class definitions and per-site coverage) and Rhine dataset 100089 (station/gauge definitions); Port of Switzerland navigation restrictions for Rhine operational rules.
+4. MeteoSwiss official station/API field documentation and BAS station metadata for units, observation intervals and location.
+5. Only if the model later claims product quality risk: manufacturer stability data, product-specific excursion policy, packaging qualification/thermal mapping, logger accuracy, and QA-approved handling SOP. University-access papers can inform thermal modelling or sensor methods, but cannot supply this missing product-specific disposition rule.
+
+## Sources
+
+- [WHO TRS 961 Annex 9: Model guidance for storage and transport](https://www.who.int/publications/m/item/trs961-annex9)
+- [WHO TRS 992 Annex 5, Supplement 14: Transport route profiling qualification](https://cdn.who.int/media/docs/default-source/medicines/norms-and-standards/guidelines/distribution/trs992-annex5.pdf)
+- [WHO TRS 961 Annex 9, Supplement 15: Transport monitoring systems](https://www.who.int/publications/m/item/Annex-9-n-trs-961)
+- [WHO TRS 1025 Annex 7: Good storage and distribution practices](https://www.who.int/publications/m/item/trs-1025-annex-7)
+- [Basel-Stadt traffic count dataset 100006](https://data.bs.ch/explore/dataset/100006/information/?flg=fr-ch)
+- [Basel-Stadt Rhine level and discharge dataset 100089](https://data.bs.ch/explore/dataset/100089/table/?flg=de-ch&sort=timestamp)
+- [Port of Switzerland water levels and navigation marks](https://port-of-switzerland.ch/hafenservice/pegel/)
+- [MeteoSwiss automatic weather station field definitions](https://opendatadocs.meteoswiss.ch/a-data-groundbased/a1-automatic-weather-stations)
