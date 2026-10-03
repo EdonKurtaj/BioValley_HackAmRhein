@@ -118,7 +118,7 @@ def detect_traffic_disturbance(
     data_dir: Path = DEFAULT_DATA_DIR, route_counters: tuple[TrafficCounterMatch, ...] = (),
     *, snapshot: dict | None = None, historical_records: list[dict] | None = None,
 ) -> Disturbance:
-    """Compare newest traffic row to older same-counter, weekday, and hour rows."""
+    """Evaluate each selected counter, then combine its comparable-volume signal."""
     if snapshot is None:
         snapshot = read_snapshot(data_dir, "basel_dataset_100006")
     if not snapshot or not snapshot.get("request_ok"):
@@ -127,10 +127,33 @@ def detect_traffic_disturbance(
     if not route_counters:
         return Disturbance("Basel traffic counts", "unknown", "No traffic counters are mapped to this shipment route.", (),
                            "No traffic-based decision.")
-    matches = {(item.sitecode, item.directionname, item.lanecode) for item in route_counters}
     source_records = historical_records if historical_records is not None else _read_traffic_records(data_dir)
+    findings = []
+    evidence = []
+    for match in dict.fromkeys(route_counters):
+        finding = _assess_traffic_counter(source_records, match)
+        findings.append(finding)
+        label = f"Counter {match.sitecode}/{match.directionname}/{match.lanecode}"
+        evidence.extend((f"{label}: {finding.summary}", *finding.evidence))
+    if len(findings) == 1:
+        return findings[0]
+    known = [finding for finding in findings if finding.robust_z is not None]
+    strongest = max(known, key=lambda finding: finding.robust_z) if known else None
+    # A confirmed anomaly saturates the traffic score; missing counters cannot
+    # weaken it. Below that threshold, missing selected evidence stays unknown.
+    if strongest and (len(known) == len(findings) or strongest.status == "detected"):
+        return Disturbance(strongest.source, strongest.status, strongest.summary,
+                           tuple(evidence), strongest.action_effect, strongest.robust_z)
+    return Disturbance("Basel traffic counts", "unknown",
+                       "One or more selected traffic counters have unavailable or stale evidence.",
+                       tuple(evidence), "No complete traffic-based decision.")
+
+
+def _assess_traffic_counter(source_records: list[dict], match: TrafficCounterMatch) -> Disturbance:
+    """Compare one counter's latest row with its own weekday/hour baseline."""
+    identity = (match.sitecode, match.directionname, match.lanecode)
     records = [row for row in source_records
-               if (row.get("sitecode"), row.get("directionname"), row.get("lanecode")) in matches]
+               if (row.get("sitecode"), row.get("directionname"), row.get("lanecode")) == identity]
     if not records:
         return Disturbance("Basel traffic counts", "unknown", "No usable traffic records were saved.", (),
                            "No traffic-based decision.")

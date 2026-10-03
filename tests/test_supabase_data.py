@@ -2,13 +2,14 @@ import json
 import os
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
 from risk_assessment.observed import assess_observed_data
 from risk_assessment.interfaces import RouteEvidence
-from risk_assessment.supabase_data import fetch_latest_weather_snapshot
+from risk_assessment.supabase_data import fetch_latest_weather_snapshot, fetch_supabase_sources
+from risk_assessment.dashboard import live_dashboard
 
 
 class _Response:
@@ -79,6 +80,58 @@ class SupabaseWeatherTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "set SUPABASE_URL and SUPABASE_SECRET_KEY"):
                 fetch_latest_weather_snapshot(Path(tempfile.gettempdir()))
         request.assert_not_called()
+
+
+class SupabasePortTests(unittest.TestCase):
+    def setUp(self):
+        self.now = datetime.now(timezone.utc)
+
+    def dashboard_after_empty_import(self, measurement_age=10, available=True):
+        row = {"source_id": "port_pegel_current", "station_id": "Basel-Rheinhalle", "station_name": "Basel-Rheinhalle",
+               "metric": "water_level", "value": 478, "unit": "cm", "fetch_run_id": "valid-run",
+               "observed_at": (self.now - timedelta(minutes=measurement_age)).isoformat()}
+        latest_run = {"id": "empty-run", "request_ok": True, "fetched_at": self.now.isoformat(),
+                      "error": "Normalization: missing gauge value", "raw_payload": {"tables": []}}
+
+        def observations(_url, _key, table, query):
+            self.assertEqual(table, "observations")
+            rows = [row, {**row, "station_id": "Other-gauge", "station_name": "Other-gauge",
+                          "value": 999, "observed_at": self.now.isoformat(), "fetch_run_id": "empty-run"}] if available else []
+            for field, condition in query.items():
+                if condition.startswith("eq."):
+                    rows = [item for item in rows if item.get(field) == condition[3:]]
+                elif condition == "not.is.null":
+                    rows = [item for item in rows if item.get(field) is not None]
+            rows.sort(key=lambda item: item["observed_at"], reverse=True)
+            return rows[:int(query["limit"])]
+
+        with patch("risk_assessment.supabase_data._credentials", return_value=("https://example.test", "example-key")), \
+                patch("risk_assessment.supabase_data._weather_snapshot", return_value={}), \
+                patch("risk_assessment.supabase_data._observations", return_value=[]), \
+                patch("risk_assessment.supabase_data._latest_run", side_effect=lambda _u, _k, source: latest_run if source == "port_pegel_current" else None), \
+                patch("risk_assessment.supabase_data._get_json", side_effect=observations):
+            sources = fetch_supabase_sources()
+        return live_dashboard(sources, now=self.now)
+
+    def test_empty_new_import_retains_previous_valid_gauge_measurement(self):
+        dashboard = self.dashboard_after_empty_import()
+        gauge = next(signal for signal in dashboard["signals"] if signal["id"] == "rhine")
+        self.assertEqual(gauge["value"], 478)
+        self.assertEqual(gauge["freshness"], "current")
+        self.assertEqual(gauge["observedAt"], (self.now - timedelta(minutes=10)).isoformat())
+
+    def test_fresh_empty_import_does_not_refresh_old_measurement(self):
+        dashboard = self.dashboard_after_empty_import(measurement_age=60)
+        gauge = next(signal for signal in dashboard["signals"] if signal["id"] == "rhine")
+        self.assertEqual(gauge["value"], 478)
+        self.assertEqual(gauge["freshness"], "stale")
+        self.assertEqual(gauge["severity"], "unknown")
+
+    def test_no_previous_measurement_remains_unknown(self):
+        dashboard = self.dashboard_after_empty_import(available=False)
+        gauge = next(signal for signal in dashboard["signals"] if signal["id"] == "rhine")
+        self.assertIsNone(gauge["value"])
+        self.assertEqual(gauge["freshness"], "unknown")
 
 
 if __name__ == "__main__":

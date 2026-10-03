@@ -53,7 +53,7 @@ DEFAULT_SENSOR_MAX_GAP = timedelta(minutes=15)
 
 # Minute counters require a recent measurement, independent of the fetch time.
 ROAD_COUNTER_FRESHNESS_MINUTES = 5.0
-# Event snapshots are polled by the regular ten-minute collector.
+# Event snapshots are polled each minute; this is the demo freshness allowance.
 ROAD_EVENT_FRESHNESS_MINUTES = 15.0
 # Demo action watch threshold: 50% speed loss, not a calibrated congestion probability.
 ROAD_SPEED_WATCH_SEVERITY = 50.0

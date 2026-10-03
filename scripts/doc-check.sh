@@ -38,7 +38,8 @@ for f in $FILES; do
     { line=$0; while (match(line, /`[^`]+`/)) { print substr(line, RSTART+1, RLENGTH-2); line = substr(line, RSTART+RLENGTH) } }
   ' "$f" | while IFS= read -r tok; do
     tok="${tok%%#*}"; tok="${tok%:}"; tok="${tok%,}"; tok="${tok%)}"; tok="${tok#(}"; tok="${tok#./}"
-    tok="$(echo "$tok" | sed -E 's/:[0-9]+$//')"
+    tok="$(printf '%s' "$tok" | sed -E 's@\\@/@g; s/:[0-9]+$//')"
+    tok="${tok#./}"
     [ -z "$tok" ] && continue
     case "$tok" in *.*) ;; feat/*|fix/*|data/*|chore/*|iface/*) continue ;; esac   # branch names (no extension), not paths
     case "$tok" in *" "*|*"<"*|*">"*|*"*"*|http*|/*|"~"*|'$'*|@*|-*|.env*|.hack/*|*"{"*|*"="*) continue ;; esac

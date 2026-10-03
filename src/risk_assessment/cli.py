@@ -60,7 +60,7 @@ def _supabase_sources_for(args: argparse.Namespace) -> dict:
     """Load every risk input from Supabase once per CLI invocation."""
     sources = getattr(args, "_supabase_sources", None)
     if sources is None:
-        sources = fetch_supabase_sources()
+        sources = fetch_supabase_sources(traffic_counters=parse_traffic_counters(args.traffic_counter))
         args._supabase_sources = sources
     return sources
 
