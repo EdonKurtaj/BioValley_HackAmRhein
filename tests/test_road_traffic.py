@@ -145,8 +145,14 @@ class RoadTrafficTests(unittest.TestCase):
 
     def test_cli_and_missing_evidence_bounds(self):
         self.save()
-        args = build_parser().parse_args(["--data-dir", str(self.root), "--weather-source", "local",
-                                          "--road-counter", "detector|light|80"])
+        args = build_parser().parse_args(["--road-counter", "detector|light|80"])
+        args._supabase_sources = {
+            "meteoswiss_basel_temperature": None,
+            "basel_dataset_100006": {"request_ok": False, "data": {"results": []}, "history_results": []},
+            "basel_dataset_100089": {"request_ok": False, "data": {"results": []}},
+            "port_pegel_clean": {"current_readings": [], "flood_thresholds": []},
+            "opentransportdata_basel_region": self.payload,
+        }
         result = run_observed(args)
         score = result["manufacturing_priority_score"]
         self.assertEqual(score["score"], 5)

@@ -119,8 +119,14 @@ class ShipmentDecisionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             parse_traffic_counters(["route-site"])
         with tempfile.TemporaryDirectory() as temporary:
-            args = build_parser().parse_args(["--scenario", "all", "--data-dir", temporary,
-                                              "--weather-source", "local"])
+            args = build_parser().parse_args(["--scenario", "all"])
+            args._supabase_sources = {
+                "meteoswiss_basel_temperature": None,
+                "basel_dataset_100006": {"request_ok": False, "data": {"results": []}, "history_results": []},
+                "basel_dataset_100089": {"request_ok": False, "data": {"results": []}},
+                "port_pegel_clean": {"current_readings": [], "flood_thresholds": []},
+                "opentransportdata_basel_region": {"request_ok": False, "data": {}},
+            }
             result = run_demo_suite_data(args)
             self.assertEqual([case["assessment"]["action"] for case in result["scenarios"][:4]],
                              ["normal", "buffer", "expedite", "reroute"])

@@ -14,11 +14,11 @@ from .config import ROUTE_WEIGHT, THERMAL_WEIGHT, URGENCY_WEIGHT
 from .disturbance import detect_open_data_disturbances
 from .interfaces import RoadCounterMatch, RoadEventMatch, RouteEvidence, TrafficCounterMatch
 from .logistics import TrafficAnomaly, classify_rhine_high_water, traffic_volume_anomaly
-from .local_data import DEFAULT_DATA_DIR, collect_local_context, read_snapshot
+from .local_data import DEFAULT_DATA_DIR, collect_local_context
 from .observed import assess_observed_data, render_observed_summary
 from .priority import calculate_priority_score
 from .thermal import analyze_temperature_series, simulate_package_temperature, time_to_temperature_limit
-from .supabase_weather import fetch_latest_weather_snapshot
+from .supabase_data import fetch_supabase_sources
 
 
 def parse_traffic_counters(values: list[str]) -> tuple[TrafficCounterMatch, ...]:
@@ -56,25 +56,21 @@ def parse_road_events(values: list[str]) -> tuple[RoadEventMatch, ...]:
     return tuple(matches)
 
 
-def _weather_snapshot_for(args: argparse.Namespace) -> dict | None:
-    """Load the selected weather store once per CLI invocation."""
-    if args.weather_source == "local":
-        return None
-    snapshot = getattr(args, "_weather_snapshot", None)
-    if snapshot is None:
-        snapshot = fetch_latest_weather_snapshot()
-        args._weather_snapshot = snapshot
-    return snapshot
+def _supabase_sources_for(args: argparse.Namespace) -> dict:
+    """Load every risk input from Supabase once per CLI invocation."""
+    sources = getattr(args, "_supabase_sources", None)
+    if sources is None:
+        sources = fetch_supabase_sources()
+        args._supabase_sources = sources
+    return sources
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scenario", choices=("observed", "hot", "cold", "normal", "observed-weather", "combined", "rain", "traffic", "rhine",
                                                 "buffer", "expedite", "reroute", "stale", "all"), default="observed",
-                        help="Default: score saved observations only. Other scenarios explicitly simulate inputs.")
-    parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
-    parser.add_argument("--weather-source", choices=("supabase", "local"), default="supabase",
-                        help="Observed assessment weather source (default: latest MeteoSwiss rows in Supabase)")
+                        help="Default: assess current Supabase observations. Other scenarios explicitly simulate inputs.")
+    parser.set_defaults(data_dir=DEFAULT_DATA_DIR)
     parser.add_argument("--output-format", choices=("table", "json"), default="table",
                         help="Use a readable terminal summary (default) or machine-readable JSON")
     parser.add_argument("--start-c", type=float, default=7.0)
@@ -106,7 +102,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def run(args: argparse.Namespace) -> dict:
-    context = collect_local_context(args.data_dir, _weather_snapshot_for(args))
+    sources = _supabase_sources_for(args)
+    context = collect_local_context(args.data_dir, source_snapshots=sources)
     weather = context.get("weather") or {}
     weather_readings = weather.get("measurements", {})
     weather_current = weather.get("source_status") == "observed"
@@ -178,7 +175,7 @@ def run(args: argparse.Namespace) -> dict:
         baseline = [float(value.strip()) for value in args.traffic_baseline.split(",") if value.strip()] if args.traffic_baseline else []
         count = args.traffic_count
         if count is None:
-            traffic_snapshot = read_snapshot(args.data_dir, "basel_dataset_100006") or {}
+            traffic_snapshot = sources.get("basel_dataset_100006") or {}
             results = (traffic_snapshot.get("data") or {}).get("results") or [] \
                 if context["traffic"]["source_status"] == "observed snapshot" else []
             count = float(results[0].get("total", 0)) if results else 0.0
@@ -236,7 +233,11 @@ def run(args: argparse.Namespace) -> dict:
         "system_suggestion": suggestion,
         "traffic_anomaly": traffic_result.__dict__ if traffic_result else None,
         "rhine_status": rhine_status.__dict__ if rhine_status else None,
-        "detected_open_data_disturbances": detect_open_data_disturbances(args.data_dir, context=context),
+        "detected_open_data_disturbances": detect_open_data_disturbances(
+            args.data_dir, context=context,
+            traffic_snapshot=sources.get("basel_dataset_100006"),
+            traffic_history=(sources.get("basel_dataset_100006") or {}).get("history_results"),
+        ),
         "observed_context": context,
         "limitations": ["Scenario package temperatures are simulated, not measured.",
                         "The priority score is a configurable prototype index, not a calibrated probability or product-quality verdict.",
@@ -250,7 +251,7 @@ def run(args: argparse.Namespace) -> dict:
 
 def run_demo_suite_data(args: argparse.Namespace) -> dict:
     """Return structured scenario results suitable for later dashboard use."""
-    _weather_snapshot_for(args)
+    _supabase_sources_for(args)
     now = datetime.now(timezone.utc)
     specifications = [
         ("Normal", "normal", now + timedelta(hours=2), now + timedelta(hours=8)),
@@ -428,9 +429,10 @@ def run_observed(args: argparse.Namespace) -> dict:
         alternate_route_suitable=args.alternate_route_suitable,
         alternate_arrival_at=parse_time(args.alternate_eta_at),
     )
-    weather_snapshot = _weather_snapshot_for(args)
-    result = assess_observed_data(args.data_dir, route, args.rhine_route_segment, weather_snapshot)
-    result["weather_source"] = "Supabase observations" if args.weather_source == "supabase" else "local archive"
+    sources = _supabase_sources_for(args)
+    result = assess_observed_data(args.data_dir, route, args.rhine_route_segment,
+                                  source_snapshots=sources)
+    result["data_source"] = "Supabase"
     return result
 
 

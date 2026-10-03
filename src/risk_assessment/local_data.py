@@ -69,13 +69,20 @@ def read_snapshot(data_dir: Path, source_id: str) -> dict[str, Any] | None:
 def collect_local_context(
     data_dir: Path = DEFAULT_DATA_DIR,
     weather_snapshot: dict[str, Any] | None = None,
+    source_snapshots: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Summarize saved observations; an explicit weather snapshot overrides local weather."""
-    if weather_snapshot is None:
-        weather_snapshot = read_snapshot(data_dir, "meteoswiss_basel_temperature")
-    traffic = read_snapshot(data_dir, "basel_dataset_100006")
-    rhine = read_snapshot(data_dir, "basel_dataset_100089")
-    port = read_snapshot(data_dir, "port_pegel_clean")
+    """Summarize a supplied source set, or read local snapshots for offline callers."""
+    if source_snapshots is not None:
+        weather_snapshot = source_snapshots.get("meteoswiss_basel_temperature")
+        traffic = source_snapshots.get("basel_dataset_100006")
+        rhine = source_snapshots.get("basel_dataset_100089")
+        port = source_snapshots.get("port_pegel_clean")
+    else:
+        if weather_snapshot is None:
+            weather_snapshot = read_snapshot(data_dir, "meteoswiss_basel_temperature")
+        traffic = read_snapshot(data_dir, "basel_dataset_100006")
+        rhine = read_snapshot(data_dir, "basel_dataset_100089")
+        port = read_snapshot(data_dir, "port_pegel_clean")
 
     weather = None
     if weather_snapshot:

@@ -76,7 +76,8 @@ def _event_exclusion(event, match, fetched_at, now):
     return None
 
 
-def assess_road_traffic(data_dir: Path, route: RouteEvidence, *, evaluated_at=None) -> RoadTrafficEvidence:
+def assess_road_traffic(data_dir: Path, route: RouteEvidence, *, evaluated_at=None,
+                        snapshot: dict | None = None) -> RoadTrafficEvidence:
     """Maximum local signal; incomplete selected evidence leaves the component unknown.
 
     An independently verified restriction still informs action even if another selected
@@ -85,12 +86,13 @@ def assess_road_traffic(data_dir: Path, route: RouteEvidence, *, evaluated_at=No
     now = evaluated_at or datetime.now(timezone.utc)
     if now.tzinfo is None or now.utcoffset() is None:
         raise ValueError("road evaluation time must include a timezone")
-    snapshot = read_snapshot(data_dir, "opentransportdata_basel_region") or {}
-    standalone = read_snapshot(data_dir, "opentransportdata") or {}
-    combined_time = _time((snapshot.get("data") or {}).get("fetched_at"))
-    standalone_time = _time(standalone.get("fetched_at"))
-    if standalone_time is not None and (combined_time is None or standalone_time > combined_time):
-        snapshot = {"request_ok": not standalone.get("errors"), "data": standalone}
+    if snapshot is None:
+        snapshot = read_snapshot(data_dir, "opentransportdata_basel_region") or {}
+        standalone = read_snapshot(data_dir, "opentransportdata") or {}
+        combined_time = _time((snapshot.get("data") or {}).get("fetched_at"))
+        standalone_time = _time(standalone.get("fetched_at"))
+        if standalone_time is not None and (combined_time is None or standalone_time > combined_time):
+            snapshot = {"request_ok": not standalone.get("errors"), "data": standalone}
     data = snapshot.get("data") or {}
     counters = data.get("traffic_counters") or {}
     readings = counters.get("current_readings") or []

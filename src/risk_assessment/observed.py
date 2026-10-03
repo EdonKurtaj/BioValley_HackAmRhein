@@ -71,6 +71,7 @@ def assess_observed_data(
     route: RouteEvidence | None = None,
     route_segment: str | None = None,
     weather_snapshot: dict | None = None,
+    source_snapshots: dict[str, dict] | None = None,
 ) -> dict:
     """Return a current-data score; stale and route-unmatched inputs stay excluded."""
     route = route or RouteEvidence()
@@ -79,7 +80,7 @@ def assess_observed_data(
     for timestamp in (route.estimated_arrival_at, route.material_needed_at):
         if timestamp is not None and (timestamp.tzinfo is None or timestamp.utcoffset() is None):
             raise ValueError("logistics timestamps must include a timezone")
-    context = collect_local_context(data_dir, weather_snapshot)
+    context = collect_local_context(data_dir, weather_snapshot, source_snapshots)
     weather = context.get("weather") or {}
     weather_signal = score_weather_context(weather.get("measurements") or {})
     weather_signal = {
@@ -96,12 +97,18 @@ def assess_observed_data(
         weather_signal["status"] = "context only"
         weather_signal["evidence"] = ["No exposed shipment handling was confirmed; station weather is context only."]
 
-    traffic_finding = detect_traffic_disturbance(data_dir, route.traffic_counters)
+    traffic_snapshot = (source_snapshots.get("basel_dataset_100006")
+                        if source_snapshots is not None else read_snapshot(data_dir, "basel_dataset_100006"))
+    traffic_finding = detect_traffic_disturbance(
+        data_dir, route.traffic_counters, snapshot=traffic_snapshot,
+        historical_records=(traffic_snapshot or {}).get("history_results") if source_snapshots is not None else None,
+    )
     traffic_severity = None
     if traffic_finding.robust_z is not None:
         traffic_severity = min(100.0, max(0.0, traffic_finding.robust_z / TRAFFIC_ANOMALY_THRESHOLD * 100.0))
 
-    road = assess_road_traffic(data_dir, route)
+    road_snapshot = source_snapshots.get("opentransportdata_basel_region") if source_snapshots is not None else None
+    road = assess_road_traffic(data_dir, route, snapshot=road_snapshot)
     known_traffic = [value for value in (traffic_severity, road.severity) if value is not None]
     traffic_severity = max(known_traffic) if known_traffic else None
     selected_traffic_missing = (
@@ -172,7 +179,7 @@ def assess_observed_data(
     action, reason = assessment.action, assessment.reason
 
     current_traffic = traffic_finding.__dict__
-    traffic_snapshot = read_snapshot(data_dir, "basel_dataset_100006") or {}
+    traffic_snapshot = traffic_snapshot or {}
     traffic_rows = ((traffic_snapshot.get("data") or {}).get("results") or [])
     def record_time(record: dict) -> float:
         raw = record.get("datetimeto") or record.get("datetimefrom") or ""
@@ -294,7 +301,10 @@ def assess_observed_data(
                       "finding": rhine_status.__dict__},
         },
         "detected_open_data_disturbances": [
-            *detect_open_data_disturbances(data_dir, route.traffic_counters, route_segment, context),
+            *detect_open_data_disturbances(
+                data_dir, route.traffic_counters, route_segment, context,
+                traffic_snapshot, traffic_snapshot.get("history_results"),
+            ),
             {"source": "OpenTransportData road traffic",
              "status": "unknown" if road.severity is None else "detected" if road.severity > 0 else "no_anomaly",
              "summary": "Verified route evidence; severity is a policy index, not predicted delay.",

@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from risk_assessment.observed import assess_observed_data
 from risk_assessment.interfaces import RouteEvidence
-from risk_assessment.supabase_weather import fetch_latest_weather_snapshot
+from risk_assessment.supabase_data import fetch_latest_weather_snapshot
 
 
 class _Response:
@@ -42,7 +42,7 @@ class SupabaseWeatherTests(unittest.TestCase):
         ]
         with patch.dict(os.environ, {"SUPABASE_URL": "https://example.supabase.co",
                                     "SUPABASE_SECRET_KEY": "test.secret.key"}), \
-                patch("risk_assessment.supabase_weather.urlopen", return_value=_Response(rows)) as request:
+                patch("risk_assessment.supabase_data.urlopen", return_value=_Response(rows)) as request:
             snapshot = fetch_latest_weather_snapshot(Path(tempfile.gettempdir()))
 
         self.assertEqual(snapshot["storage"], "Supabase observations")
@@ -75,7 +75,7 @@ class SupabaseWeatherTests(unittest.TestCase):
 
     def test_missing_credentials_are_reported_without_contacting_database(self):
         with patch.dict(os.environ, {"SUPABASE_URL": "", "SUPABASE_SECRET_KEY": ""}, clear=False), \
-                patch("risk_assessment.supabase_weather.urlopen") as request:
+                patch("risk_assessment.supabase_data.urlopen") as request:
             with self.assertRaisesRegex(ValueError, "set SUPABASE_URL and SUPABASE_SECRET_KEY"):
                 fetch_latest_weather_snapshot(Path(tempfile.gettempdir()))
         request.assert_not_called()

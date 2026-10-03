@@ -115,9 +115,11 @@ def _observation_age_minutes(timestamp: str | None) -> float | None:
 
 def detect_traffic_disturbance(
     data_dir: Path = DEFAULT_DATA_DIR, route_counters: tuple[TrafficCounterMatch, ...] = (),
+    *, snapshot: dict | None = None, historical_records: list[dict] | None = None,
 ) -> Disturbance:
     """Compare newest traffic row to older same-counter, weekday, and hour rows."""
-    snapshot = read_snapshot(data_dir, "basel_dataset_100006")
+    if snapshot is None:
+        snapshot = read_snapshot(data_dir, "basel_dataset_100006")
     if not snapshot or not snapshot.get("request_ok"):
         return Disturbance("Basel traffic counts", "unknown", "Traffic observations are unavailable.", (),
                            "No traffic-based decision.")
@@ -125,7 +127,8 @@ def detect_traffic_disturbance(
         return Disturbance("Basel traffic counts", "unknown", "No traffic counters are mapped to this shipment route.", (),
                            "No traffic-based decision.")
     matches = {(item.sitecode, item.directionname, item.lanecode) for item in route_counters}
-    records = [row for row in _read_traffic_records(data_dir)
+    source_records = historical_records if historical_records is not None else _read_traffic_records(data_dir)
+    records = [row for row in source_records
                if (row.get("sitecode"), row.get("directionname"), row.get("lanecode")) in matches]
     if not records:
         return Disturbance("Basel traffic counts", "unknown", "No usable traffic records were saved.", (),
@@ -171,9 +174,11 @@ def detect_traffic_disturbance(
 def detect_open_data_disturbances(
     data_dir: Path = DEFAULT_DATA_DIR, route_counters: tuple[TrafficCounterMatch, ...] = (),
     route_segment: str | None = None, context: dict | None = None,
+    traffic_snapshot: dict | None = None, traffic_history: list[dict] | None = None,
 ) -> list[dict]:
     """Return data-supported events; environmental context is not a package excursion."""
-    traffic = detect_traffic_disturbance(data_dir, route_counters)
+    traffic = detect_traffic_disturbance(data_dir, route_counters, snapshot=traffic_snapshot,
+                                          historical_records=traffic_history)
     context = context if context is not None else collect_local_context(data_dir)
     weather = context.get("weather") or {}
     rhine = context.get("rhine") or {}
