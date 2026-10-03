@@ -1,4 +1,4 @@
-"""Run a deterministic local cold-chain assessment scenario."""
+"""Assess saved open data by default, or explicitly run a local scenario."""
 
 from __future__ import annotations
 
@@ -14,17 +14,19 @@ from .disturbance import detect_open_data_disturbances
 from .interfaces import RouteEvidence
 from .logistics import TrafficAnomaly, classify_rhine_high_water, traffic_volume_anomaly
 from .local_data import DEFAULT_DATA_DIR, collect_local_context, read_snapshot
+from .observed import assess_observed_data, render_observed_summary
 from .priority import calculate_priority_score
 from .thermal import analyze_temperature_series, simulate_package_temperature, time_to_temperature_limit
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scenario", choices=("hot", "cold", "normal", "observed-weather", "combined", "rain", "traffic", "rhine",
-                                                "buffer", "expedite", "reroute", "stale", "all"), default="hot")
+    parser.add_argument("--scenario", choices=("observed", "hot", "cold", "normal", "observed-weather", "combined", "rain", "traffic", "rhine",
+                                                "buffer", "expedite", "reroute", "stale", "all"), default="observed",
+                        help="Default: score saved observations only. Other scenarios explicitly simulate inputs.")
     parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
     parser.add_argument("--output-format", choices=("table", "json"), default="table",
-                        help="Output format for --scenario all; single scenarios always output JSON")
+                        help="Use a readable terminal summary (default) or machine-readable JSON")
     parser.add_argument("--start-c", type=float, default=7.0)
     parser.add_argument("--ambient-c", type=float, help="Scenario ambient temperature; defaults by scenario")
     parser.add_argument("--duration-minutes", type=float, default=60.0)
@@ -191,6 +193,7 @@ def run_demo_suite_data(args: argparse.Namespace) -> dict:
     return {
         "mode": "local observed context plus explicitly simulated scenario results",
         "pipeline": ["Open data", "Disturbance detection", "Risk assessment", "Manufacturing decision", "Factory dashboard"],
+        "current_observed_assessment": run_observed(args),
         "local_observed_context": context,
         "detected_open_data_disturbances": disturbances,
         "scenarios": [
@@ -209,12 +212,13 @@ def run_demo_suite_data(args: argparse.Namespace) -> dict:
     }
 
 
-def run_demo_suite(args: argparse.Namespace) -> str:
+def run_demo_suite(args: argparse.Namespace, results: dict | None = None) -> str:
     """Render all decision paths beside current local data for terminal review."""
-    results = run_demo_suite_data(args)
+    results = results or run_demo_suite_data(args)
     outcomes = [(item["label"], item) for item in results["scenarios"]]
     context = results["local_observed_context"]
     disturbances = results["detected_open_data_disturbances"]
+    observed_score = results["current_observed_assessment"]["manufacturing_priority_score"]
     weather = context.get("weather") or {}
     measurements = weather.get("measurements") or {}
     traffic = context.get("traffic") or {}
@@ -233,6 +237,10 @@ def run_demo_suite(args: argparse.Namespace) -> str:
     lines.extend(f"- {item['source']}: {item['status']} — {item['summary']}" for item in disturbances)
     lines.extend([
         "",
+        "CURRENT OBSERVED-DATA SCORE (no simulated inputs)",
+        f"Current Risk Score: {observed_score['score'] if observed_score['score'] is not None else 'unknown'}/100 "
+        f"(coverage {observed_score['coverage_percent']:.0f}%)",
+        "",
         "DECISION SCENARIOS (package readings and route/ETA cases are simulations)",
         "| Case | Result | Priority score | Coverage | Route/ETA evidence |",
         "|---|---|---:|---:|---|",
@@ -243,6 +251,13 @@ def run_demo_suite(args: argparse.Namespace) -> str:
         score = f"{priority['minimum']:.1f}" if priority["minimum"] == priority["maximum"] else f"{priority['minimum']:.1f}–{priority['maximum']:.1f}"
         evidence = "; ".join(assessment["logistics_evidence"]) or "No route trigger"
         lines.append(f"| {label} | **{assessment['action'].replace('_', ' ').title()}** | {score} | {priority['coverage_percent']:.0f}% | {evidence} |")
+    combined = next(item for item in results["scenarios"] if item["scenario"] == "combined")
+    combined_score = combined["manufacturing_priority_score"]
+    combined_score_value = (f"{combined_score['minimum']:.1f}"
+                            if combined_score["minimum"] == combined_score["maximum"]
+                            else f"{combined_score['minimum']:.1f}–{combined_score['maximum']:.1f}")
+    combined_ambient_label = ("observed MeteoSwiss air temperature" if combined["scenario_inputs"]["ambient_source"] == "MeteoSwiss observation"
+                              else "illustrative 20 °C fallback ambient")
     lines.extend([
         "",
         "The Normal, Buffer, Expedite, and Reroute cases are simulated so each pathway can be checked without GPS or a map. Current open data stays visible as real context; it does not silently become a simulated truck delay.",
@@ -251,16 +266,40 @@ def run_demo_suite(args: argparse.Namespace) -> str:
         "The combined case uses current outdoor temperature as a simulated ambient exposure, a simulated traffic disruption, and a simulated one-hour production slack. A quality review overrides logistics action if the simulated box temperature leaves 2–8 °C; the score itself never orders quarantine.",
         "A quality review/hold is triggered by package-temperature evidence and stays separate from the manufacturing priority score.",
         "",
+        f"Combined Scenario Risk Score: {combined_score_value}/100 ({combined_ambient_label} + simulated package, traffic, and deadline)",
     ])
+    return "\n".join(lines)
+
+
+def render_scenario_summary(result: dict) -> str:
+    """Show a simulated scenario's score and evidence in a readable terminal view."""
+    score = result["manufacturing_priority_score"]
+    low, high = score["minimum"], score["maximum"]
+    score_text = f"{low:.1f}" if low == high else f"{low:.1f}–{high:.1f}"
+    inputs = result["scenario_inputs"]
+    package = result["package_temperature"]
+    assessment = result["assessment"]
+    lines = [
+        f"SCENARIO: {result['scenario']} (simulated; not observed shipment telemetry)",
+        f"Package temperature: {package['final_temperature_c']:.1f} °C after {inputs['duration_minutes']:.0f} min"
+        if package["final_temperature_c"] is not None else "Package temperature: unavailable in this scenario",
+        f"Decision: {assessment['action'].replace('_', ' ').title()} — {assessment['reason']}",
+        f"Current Risk Score: {score_text}/100 (coverage {score['coverage_percent']:.0f}%)",
+        score["interpretation"],
+    ]
+    if assessment["logistics_evidence"]:
+        lines.append("Scenario evidence: " + " ".join(assessment["logistics_evidence"]))
     return "\n".join(lines)
 
 
 def main() -> int:
     args = build_parser().parse_args()
-    if args.scenario == "all":
+    if args.scenario in ("observed", "all"):
         try:
-            output = (json.dumps(run_demo_suite_data(args), indent=2, ensure_ascii=False)
-                      if args.output_format == "json" else run_demo_suite(args))
+            result = run_observed(args) if args.scenario == "observed" else run_demo_suite_data(args)
+            output = (json.dumps(result, indent=2, ensure_ascii=False)
+                      if args.output_format == "json" else
+                      render_observed_summary(result) if args.scenario == "observed" else run_demo_suite(args, result))
             print(output)
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             raise SystemExit(str(exc)) from exc
@@ -273,8 +312,21 @@ def main() -> int:
         result = run(args)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         raise SystemExit(str(exc)) from exc
-    print(json.dumps(result, indent=2, ensure_ascii=False))
+    output = (json.dumps(result, indent=2, ensure_ascii=False)
+              if args.output_format == "json" else render_scenario_summary(result))
+    print(output)
     return 0
+
+
+def run_observed(args: argparse.Namespace) -> dict:
+    """Score currently saved public observations and optional caller ETA/route metadata."""
+    route = RouteEvidence(
+        alternate_route_available=args.alternate_route_available,
+        estimated_arrival_at=parse_time(args.eta_at),
+        material_needed_at=parse_time(args.needed_at),
+        buffer_hours=args.buffer_hours,
+    )
+    return assess_observed_data(args.data_dir, route, args.rhine_route_segment)
 
 
 if __name__ == "__main__":

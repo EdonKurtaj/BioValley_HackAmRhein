@@ -5,9 +5,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from risk_assessment.decision import decide_action
-from risk_assessment.disturbance import detect_traffic_disturbance
+from risk_assessment.disturbance import detect_traffic_disturbance, score_weather_context
 from risk_assessment.interfaces import ExposureMetrics, RouteEvidence, TemperatureReading
 from risk_assessment.logistics import classify_rhine_high_water, traffic_volume_anomaly
+from risk_assessment.observed import assess_observed_data
 from risk_assessment.priority import calculate_priority_score
 from risk_assessment.thermal import analyze_temperature_series, simulate_package_temperature, time_to_temperature_limit
 
@@ -114,6 +115,66 @@ class PriorityScoreTests(unittest.TestCase):
         score = calculate_priority_score(thermal, RouteEvidence())
         self.assertEqual(score.components["thermal"], 100)
         self.assertEqual(score.weighted_points["thermal"], 40)
+
+
+class ObservedDataScoreTests(unittest.TestCase):
+    def test_normal_weather_does_not_create_a_package_excursion_score(self):
+        result = score_weather_context({"tre200s0": 18.4, "rre150z0": 0, "fu3010z1": 7.2})
+        self.assertEqual(result["status"], "no_anomaly")
+        self.assertEqual(result["score"], 0)
+
+    def test_weather_context_caps_weather_contribution_at_its_weight(self):
+        result = score_weather_context({"tre200s0": 35, "rre150z0": 0, "fu3010z1": 7.2})
+        self.assertEqual(result["score"], 50)
+
+    def test_observed_assessment_excludes_stale_or_unmatched_inputs(self):
+        now = datetime.now(timezone.utc)
+        stamp = now.isoformat()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            weather_dir = root / "meteoswiss_basel_temperature"
+            traffic_dir = root / "basel_dataset_100006"
+            port_dir = root / "port_pegel_clean"
+            for directory in (weather_dir, traffic_dir, port_dir):
+                directory.mkdir()
+            (weather_dir / "latest.json").write_text(json.dumps({
+                "request_ok": True, "checked_at": stamp,
+                "data": {"station": {"observed_at_utc": stamp, "observed_at": stamp,
+                         "age_minutes_at_fetch": 0, "station_id": "BAS",
+                         "measurements": {"tre200s0": 18.4, "rre150z0": 0, "fu3010z1": 7.2}}},
+            }), encoding="utf-8")
+            row = {"datetimefrom": stamp, "datetimeto": stamp, "sitecode": "counter",
+                   "directionname": "north", "lanecode": 1, "weekday": now.weekday(),
+                   "hourfrom": now.hour, "total": 66, "sitename": "Example counter"}
+            (traffic_dir / "latest.json").write_text(json.dumps({
+                "request_ok": True, "checked_at": stamp, "data": {"results": [row]},
+            }), encoding="utf-8")
+            (port_dir / "latest.json").write_text(json.dumps({
+                "current_page_checked_at": stamp,
+                "current_readings": [{"name": "Basel-Rheinhalle", "value": 479, "unit": "cm"}],
+                "flood_thresholds": [{"mark": "I", "water_level": 700}],
+            }), encoding="utf-8")
+            result = assess_observed_data(root)
+
+        score = result["manufacturing_priority_score"]
+        self.assertEqual(score["score"], 0)
+        self.assertEqual(score["coverage_percent"], 20)
+        self.assertEqual([item["contributed_points"] for item in score["components"]], [0, None, None, None])
+        self.assertIn("no package-temperature curve", result["mode"])
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            weather_dir = root / "meteoswiss_basel_temperature"
+            weather_dir.mkdir()
+            old_observation = (now - timedelta(hours=1)).isoformat()
+            (weather_dir / "latest.json").write_text(json.dumps({
+                "request_ok": True, "checked_at": stamp,
+                "data": {"station": {"observed_at_utc": old_observation, "age_minutes_at_fetch": 0,
+                         "measurements": {"tre200s0": 18.4, "rre150z0": 0, "fu3010z1": 7.2}}},
+            }), encoding="utf-8")
+            result = assess_observed_data(root)
+            self.assertEqual(result["current_observations"]["weather"]["source_status"], "stale")
+            self.assertEqual(result["manufacturing_priority_score"]["score"], None)
 
 
 class LogisticsTests(unittest.TestCase):

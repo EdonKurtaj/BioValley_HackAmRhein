@@ -48,14 +48,21 @@ def collect_local_context(data_dir: Path = DEFAULT_DATA_DIR) -> dict[str, Any]:
     if weather_snapshot:
         station = (weather_snapshot.get("data") or {}).get("station") or {}
         checked_at = weather_snapshot.get("checked_at")
-        age_minutes = _age_minutes(checked_at)
+        snapshot_age_minutes = _age_minutes(checked_at)
+        observation_age_minutes = _age_minutes(station.get("observed_at_utc") or station.get("observed_at"))
+        if observation_age_minutes is None and station.get("age_minutes_at_fetch") is not None:
+            try:
+                observation_age_minutes = max(0.0, float(station["age_minutes_at_fetch"]) + (snapshot_age_minutes or 0.0))
+            except (TypeError, ValueError):
+                observation_age_minutes = None
         weather = {
             "observed_at": station.get("observed_at"),
             "age_minutes_at_fetch": station.get("age_minutes_at_fetch"),
-            "snapshot_age_minutes": age_minutes,
+            "observation_age_minutes": observation_age_minutes,
+            "snapshot_age_minutes": snapshot_age_minutes,
             "station_id": station.get("station_id"),
             "measurements": station.get("measurements") or {},
-            "source_status": ("observed" if age_minutes is not None and age_minutes <= LOCAL_WEATHER_FRESHNESS_MINUTES else "stale")
+            "source_status": ("observed" if observation_age_minutes is not None and observation_age_minutes <= LOCAL_WEATHER_FRESHNESS_MINUTES else "stale")
             if weather_snapshot.get("request_ok") else "unavailable",
         }
 
@@ -74,6 +81,7 @@ def collect_local_context(data_dir: Path = DEFAULT_DATA_DIR) -> dict[str, Any]:
 
     rhine_results = (rhine or {}).get("data", {}).get("results") or []
     latest_rhine = rhine_results[0] if rhine_results else None
+    basel_stadt_age = _age_minutes(latest_rhine.get("timestamp")) if latest_rhine else None
     port_data = port or {}
     port_current = next(
         (item for item in port_data.get("current_readings", []) if item.get("name") == "Basel-Rheinhalle"),
@@ -87,6 +95,7 @@ def collect_local_context(data_dir: Path = DEFAULT_DATA_DIR) -> dict[str, Any]:
         "traffic": traffic_context,
         "rhine": {
             "basel_stadt_latest": latest_rhine,
+            "basel_stadt_observation_age_minutes": basel_stadt_age,
             "port_basel_rheinhalle": port_current,
             "port_snapshot_age_minutes": port_age,
             "port_thresholds": thresholds,

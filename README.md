@@ -10,21 +10,33 @@ Who has it, and what they do today.
 
 ## How to run it
 
-From the repository root, run a deterministic hot-exposure scenario using locally saved observations as context:
+From the repository root, run the saved open-data observations only. This is the default and does not simulate package temperature, traffic, or ETA:
+
+```sh
+PYTHONPATH=src python3 -m risk_assessment.cli
+```
+
+If the saved observations are stale, refresh them once before running the assessment:
+
+```sh
+python3 pythontest/api_requester.py --once
+```
+
+By default, the CLI prints a readable summary with the risk score and data coverage. Add `--output-format json` for the full structured observations and score components. Run a package-temperature scenario explicitly with:
 
 ```sh
 PYTHONPATH=src python3 -m risk_assessment.cli --scenario hot --start-c 7 --duration-minutes 60 --tau-minutes 90
 ```
 
-Run the four-case factory dashboard simulation with:
+Run all simulated decision cases beside the current observed-data assessment with:
 
 ```sh
 PYTHONPATH=src python3 -m risk_assessment.cli --scenario all
 ```
 
-The Normal, Buffer, Expedite, and Reroute triggers use explicit simulated route/ETA evidence; the live data freshness and disturbance findings are shown alongside them. No map or GPS trace is required to exercise the decision logic.
+The Normal, Buffer, Expedite, Reroute, and combined cases use explicit simulated route/ETA evidence. The observed-data score appears separately. No map or GPS trace is required to exercise the decision logic.
 
-Choose `--scenario cold` for a cold exposure, or use `--scenario observed-weather` to use a MeteoSwiss air-temperature observation as ambient context when the saved snapshot is no more than 30 minutes old. A stale or missing snapshot falls back to an explicitly illustrative 20 °C. Set `--ambient-c` to override the scenario ambient temperature. The package time constant is an illustrative input, not a qualified packaging property.
+Choose `--scenario cold` for a cold exposure, or use `--scenario observed-weather` to simulate package response to the saved MeteoSwiss air temperature when the observation is no more than 30 minutes old. Stale or missing weather does not enter the observed-only score. Set `--ambient-c` to override the scenario ambient temperature. The package time constant is an illustrative input, not a qualified packaging property.
 
 Run the calculation checks with:
 

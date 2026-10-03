@@ -51,6 +51,7 @@ dist/
 .venv/
 venv/
 env/
+pythontest/data
 .python-version
 .pytest_cache/
 .mypy_cache/
