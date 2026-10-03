@@ -110,9 +110,26 @@ def assess_observed_data(
     known = [item for item in components if item["contributed_points"] is not None]
     coverage = sum(item["weight_points"] for item in known)
     score = round(sum(item["contributed_points"] for item in known), 1) if known else None
+    route_trigger = rhine_status.status in ("pre_alert", "restricted") or traffic_finding.status == "detected"
+
+    if rhine_status.status == "restricted" and route.alternate_route_available:
+        suggestion = "Reroute"
+        suggestion_reason = "A matching ship-leg restriction is present and a feasible alternate route is available."
+    elif (urgency_score is not None and urgency_score >= 70) or (score is not None and score >= 50):
+        suggestion = "Expedite"
+        suggestion_reason = "Production urgency is high; prioritize delivery/receiving."
+    elif (urgency_score is not None and urgency_score >= 50) or route_trigger or (score is not None and score >= 20):
+        suggestion = "Buffer"
+        suggestion_reason = "Combined evidence indicates elevated risk; protect production slack and monitor the shipment."
+    elif coverage < 50:
+        suggestion = "Monitor"
+        suggestion_reason = (f"Only {coverage:.0f}% of score weight has evidence; collect package-temperature "
+                            "and ETA data before calling it normal.")
+    else:
+        suggestion = "Normal"
+        suggestion_reason = "Combined score is below intervention thresholds and evidence coverage is adequate."
 
     weather_score = weather_signal["score"]
-    route_trigger = rhine_status.status in ("pre_alert", "restricted") or traffic_finding.status == "detected"
     if rhine_status.status == "restricted" and route.alternate_route_available:
         action = "reroute"
         reason = "The current Port gauge meets a restriction for the supplied ship leg, and an alternate route is available."
@@ -140,6 +157,7 @@ def assess_observed_data(
         "mode": "observed data only; no package-temperature curve, route disruption, or ETA is simulated",
         "pipeline": ["Open data", "Disturbance detection", "Risk assessment", "Manufacturing decision", "Factory dashboard"],
         "action": {"recommendation": action, "reason": reason},
+        "system_suggestion": {"suggestion": suggestion, "reason": suggestion_reason},
         "manufacturing_priority_score": {
             "score": score,
             "coverage_percent": round(coverage, 1),
@@ -182,7 +200,8 @@ def render_observed_summary(result: dict) -> str:
         f"{measurements.get('tre200s0', 'unknown')} °C, "
         f"{measurements.get('rre150z0', 'unknown')} mm/10 min rain, gust {measurements.get('fu3010z1', 'unknown')} km/h; "
         f"last-observation context severity {observations['weather_score_details']['last_observation_severity'] if observations['weather_score_details']['last_observation_severity'] is not None else 'unknown'}/100; "
-        f"weather contribution {components['weather']['contributed_points'] if components['weather']['contributed_points'] is not None else 'not scored'}/20 points.",
+        f"weather contribution {components['weather']['contributed_points'] if components['weather']['contributed_points'] is not None else 'not scored'}/"
+        f"{components['weather']['weight_points']:g} points.",
         f"Traffic: {traffic.get('source_status', 'unknown')}; newest count "
         f"{traffic_row.get('total', 'unknown')} at {traffic_row.get('sitename', 'unknown')} "
         f"(pw {traffic_row.get('pw', 'unknown')}, delivery vans {traffic_row.get('lief', 'unknown')}, heavy vehicles {traffic_row.get('lw', 'unknown')}) is "
@@ -200,6 +219,7 @@ def render_observed_summary(result: dict) -> str:
         f"Production urgency: {components['production_urgency']['status']}.",
         f"Decision: {result['action']['recommendation'].replace('_', ' ').title()} — {result['action']['reason']}",
         f"Current Risk Score: {current_score}/100 (coverage {score['coverage_percent']:.0f}%)",
+        f"System Suggestion: {result['system_suggestion']['suggestion']} — {result['system_suggestion']['reason']}",
         "A score with low coverage is only the risk contribution from known observations, not a complete shipment-risk estimate.",
     ]
     if refresh_note:

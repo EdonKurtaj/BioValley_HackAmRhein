@@ -9,9 +9,10 @@ from .interfaces import ExposureMetrics, RouteEvidence
 
 # Prototype contribution weights; tune with factory stakeholders and validate
 # against shipment outcomes before using operationally.
-THERMAL_WEIGHT = 0.40
-ROUTE_WEIGHT = 0.35
-URGENCY_WEIGHT = 0.25
+# Demo priority: package exposure first, production timing second, route context third.
+THERMAL_WEIGHT = 0.50
+URGENCY_WEIGHT = 0.30
+ROUTE_WEIGHT = 0.20
 THERMAL_REFERENCE_DEGREE_HOURS = 0.5
 TRAFFIC_ANOMALY_REFERENCE_Z = 3.0
 

@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from math import isfinite
 from pathlib import Path
 
-from .decision import decide_action, parse_time
+from .decision import decide_action, parse_time, suggest_system_action
 from .disturbance import detect_open_data_disturbances
 from .interfaces import RouteEvidence
 from .logistics import TrafficAnomaly, classify_rhine_high_water, traffic_volume_anomaly
@@ -128,6 +128,7 @@ def run(args: argparse.Namespace) -> dict:
                           buffer_hours=args.buffer_hours, evidence=tuple(route_evidence))
     assessment = decide_action(thermal, route)
     priority = calculate_priority_score(thermal, route)
+    suggestion = suggest_system_action(thermal, route, priority)
     upper = time_to_temperature_limit(args.start_c, ambient, 8.0, tau)
     lower = time_to_temperature_limit(args.start_c, ambient, 2.0, tau)
     return {
@@ -152,6 +153,7 @@ def run(args: argparse.Namespace) -> dict:
                        "thermal_status": assessment.thermal_status, "logistics_status": assessment.logistics_status,
                        "logistics_evidence": list(assessment.logistics_evidence)},
         "manufacturing_priority_score": priority.as_dict(),
+        "system_suggestion": suggestion,
         "traffic_anomaly": traffic_result.__dict__ if traffic_result else None,
         "rhine_status": rhine_status.__dict__ if rhine_status else None,
         "detected_open_data_disturbances": detect_open_data_disturbances(args.data_dir),
@@ -204,6 +206,7 @@ def run_demo_suite_data(args: argparse.Namespace) -> dict:
                 "package_temperature": outcome["package_temperature"],
                 "assessment": outcome["assessment"],
                 "manufacturing_priority_score": outcome["manufacturing_priority_score"],
+                "system_suggestion": outcome["system_suggestion"],
                 "traffic_anomaly": outcome["traffic_anomaly"],
                 "rhine_status": outcome["rhine_status"],
             }
@@ -240,17 +243,19 @@ def run_demo_suite(args: argparse.Namespace, results: dict | None = None) -> str
         "CURRENT OBSERVED-DATA SCORE (no simulated inputs)",
         f"Current Risk Score: {observed_score['score'] if observed_score['score'] is not None else 'unknown'}/100 "
         f"(coverage {observed_score['coverage_percent']:.0f}%)",
+        f"System Suggestion: {results['current_observed_assessment']['system_suggestion']['suggestion']} — "
+        f"{results['current_observed_assessment']['system_suggestion']['reason']}",
         "",
         "DECISION SCENARIOS (package readings and route/ETA cases are simulations)",
-        "| Case | Result | Priority score | Coverage | Route/ETA evidence |",
-        "|---|---|---:|---:|---|",
+        "| Case | Result | System suggestion | Priority score | Coverage | Route/ETA evidence |",
+        "|---|---|---|---:|---:|---|",
     ])
     for label, outcome in outcomes:
         assessment = outcome["assessment"]
         priority = outcome["manufacturing_priority_score"]
         score = f"{priority['minimum']:.1f}" if priority["minimum"] == priority["maximum"] else f"{priority['minimum']:.1f}–{priority['maximum']:.1f}"
         evidence = "; ".join(assessment["logistics_evidence"]) or "No route trigger"
-        lines.append(f"| {label} | **{assessment['action'].replace('_', ' ').title()}** | {score} | {priority['coverage_percent']:.0f}% | {evidence} |")
+        lines.append(f"| {label} | **{assessment['action'].replace('_', ' ').title()}** | **{outcome['system_suggestion']['suggestion']}** | {score} | {priority['coverage_percent']:.0f}% | {evidence} |")
     combined = next(item for item in results["scenarios"] if item["scenario"] == "combined")
     combined_score = combined["manufacturing_priority_score"]
     combined_score_value = (f"{combined_score['minimum']:.1f}"
@@ -262,7 +267,7 @@ def run_demo_suite(args: argparse.Namespace, results: dict | None = None) -> str
         "",
         "The Normal, Buffer, Expedite, and Reroute cases are simulated so each pathway can be checked without GPS or a map. Current open data stays visible as real context; it does not silently become a simulated truck delay.",
         "Traffic counts can detect unusual volume only when fresh, route-matched counts have enough same-counter/day/hour history. A volume anomaly by itself is not congestion; measured ETA/slack is what drives Expedite.",
-        "Priority score = 40% thermal exposure + 35% route disturbance + 25% production urgency. Component scales are 0–100; combined weighted points add, while missing inputs are shown as a score range rather than counted as zero.",
+        "Priority score = 50% package thermal exposure + 30% production urgency + 20% route disturbance. Component scales are 0–100; combined weighted points add, while missing inputs are shown as a score range rather than counted as zero.",
         "The combined case uses current outdoor temperature as a simulated ambient exposure, a simulated traffic disruption, and a simulated one-hour production slack. A quality review overrides logistics action if the simulated box temperature leaves 2–8 °C; the score itself never orders quarantine.",
         "A quality review/hold is triggered by package-temperature evidence and stays separate from the manufacturing priority score.",
         "",
@@ -285,6 +290,7 @@ def render_scenario_summary(result: dict) -> str:
         if package["final_temperature_c"] is not None else "Package temperature: unavailable in this scenario",
         f"Decision: {assessment['action'].replace('_', ' ').title()} — {assessment['reason']}",
         f"Current Risk Score: {score_text}/100 (coverage {score['coverage_percent']:.0f}%)",
+        f"System Suggestion: {result['system_suggestion']['suggestion']} — {result['system_suggestion']['reason']}",
         score["interpretation"],
     ]
     if assessment["logistics_evidence"]:

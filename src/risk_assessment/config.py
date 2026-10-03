@@ -17,10 +17,10 @@ TRAFFIC_MINIMUM_SCALE = 1.0
 TRAFFIC_ANOMALY_THRESHOLD = 3.0  # Demo watch threshold; not a congestion/delay threshold.
 
 # Open-data score weights sum to 100 points. They are demo priorities, not calibrated risk.
-OPEN_WEATHER_WEIGHT = 20.0
-OPEN_TRAFFIC_WEIGHT = 35.0
-OPEN_RHINE_WEIGHT = 25.0
-OPEN_URGENCY_WEIGHT = 20.0
+OPEN_WEATHER_WEIGHT = 40.0
+OPEN_TRAFFIC_WEIGHT = 10.0
+OPEN_RHINE_WEIGHT = 15.0
+OPEN_URGENCY_WEIGHT = 35.0
 
 # Handling-context watch ranges; not product-quality limits or official weather warnings.
 HOT_AMBIENT_ONSET_C = 30.0
