@@ -44,10 +44,13 @@ class VisiblePageExtractor(PageExtractor):
 def latest_page(source_id: str) -> tuple[dict, str]:
     latest_path = DATA_DIR / source_id / "latest.json"
     record = json.loads(latest_path.read_text(encoding="utf-8"))
-    raw_relative = record.get("data", {}).get("raw_html_file")
+    data = record.get("data") or {}
+    raw_relative = data.get("raw_html_file")
     if not raw_relative:
-        raise RuntimeError(f"No saved HTML path in {latest_path}; run the API checker first.")
+        raise RuntimeError(f"No saved HTML path in {latest_path}; check the fetch and run the API checker first.")
     raw_path = ROOT / raw_relative
+    if not raw_path.is_file():
+        raise RuntimeError(f"Saved HTML file is missing or not a file: {raw_path}; check the fetch and run the API checker first.")
     return record, raw_path.read_text(encoding="utf-8", errors="replace")
 
 
