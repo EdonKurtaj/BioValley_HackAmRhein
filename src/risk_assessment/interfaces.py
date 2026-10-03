@@ -113,3 +113,30 @@ class Assessment:
     logistics_status: str
     thermal: ExposureMetrics | None = None
     logistics_evidence: tuple[str, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True)
+class ShipmentPlan:
+    """Synthetic replay inputs. Coordinates are illustrative WGS84 lon/lat corridors.
+
+    The replay provides complete simulated package/route/timing evidence; it does
+    not replace missing observations in live mode or authorize real dispatch.
+    """
+
+    id: str
+    name: str
+    material: str
+    priority: str
+    origin: str
+    destination: str
+    route_name: str
+    coordinates: tuple[tuple[float, float], ...]
+    travel_minutes: float
+    initial_elapsed_minutes: float
+    need_after_departure_minutes: float
+    delay_minutes: float
+    jam_fraction: float
+    start_c: float
+    ambient_c: float
+    tau_minutes: float
+    alternate_coordinates: tuple[tuple[float, float], ...] = ()

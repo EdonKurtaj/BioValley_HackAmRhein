@@ -59,7 +59,7 @@ export function parseSnapshot(value: unknown): MapSnapshot {
       ids.has(location.id) ||
       typeof location.name !== "string" ||
       typeof location.description !== "string" ||
-      !["port", "river", "weather"].includes(location.category) ||
+      !["port", "river", "weather", "traffic"].includes(location.category) ||
       !Number.isFinite(location.latitude) ||
       Math.abs(location.latitude) > 90 ||
       !Number.isFinite(location.longitude) ||

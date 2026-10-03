@@ -10,7 +10,7 @@ A Basel-area factory needs a critical refrigerated material on time while preser
 
 ## How to run it
 
-From the repository root, run the latest saved open-data observations only. By default, the risk assessment reads MeteoSwiss weather rows from Supabase; Rhine and traffic context still come from the collector's local archives. This does not simulate package temperature, traffic, or ETA:
+From the repository root, run the latest saved open-data observations only. The CLI reads weather, traffic, Rhine, Port and road evidence from Supabase. Credentials are read server-side from the local .env; failed database reads do not fall back to local archives. This does not simulate package temperature, traffic, or ETA:
 
 ```sh
 PYTHONPATH=src python3 -m risk_assessment.cli
@@ -22,7 +22,7 @@ The collector keeps local archives and stores measurements in Supabase when the 
 python3 pythontest/api_requester.py --once
 ```
 
-For an offline assessment using the local weather archive, pass `--weather-source local`. This changes only the weather input; traffic, Rhine and road evidence keep using their existing archive paths.
+The CLI requires Supabase access even for its contextual inputs in explicit scenarios. The web dashboard's Demo feed runs entirely offline except for map tiles and does not contact Supabase.
 
 The regular collector also fetches OpenTransportData road situations and Basel-area counter readings. It saves a combined source snapshot and counter-minute history alongside the existing per-source archives. For minute-by-minute traffic polling by itself, run:
 
@@ -46,7 +46,7 @@ PYTHONPATH=src python3 -m risk_assessment.cli --scenario all
 
 The Normal, Buffer, Expedite, Reroute, and combined cases use explicit simulated route/ETA evidence. The observed-data score appears separately. No map or GPS trace is required to exercise the decision logic.
 
-Choose `--scenario cold` for a cold exposure, or use `--scenario observed-weather` to simulate package response to the latest MeteoSwiss air temperature from the selected weather store when the observation is no more than 30 minutes old. Stale or missing weather does not enter the observed-only score. Set `--ambient-c` to override the scenario ambient temperature. The package time constant is an illustrative input, not a qualified packaging property.
+Choose `--scenario cold` for a cold exposure, or use `--scenario observed-weather` to simulate package response to the latest MeteoSwiss air temperature from Supabase when the observation is no more than 30 minutes old. Stale or missing weather does not enter the observed-only score. Set `--ambient-c` to override the scenario ambient temperature. The package time constant is an illustrative input, not a qualified packaging property.
 
 Run the calculation checks with:
 
@@ -72,38 +72,54 @@ For a reviewed event, use `--road-event 'EVENT_ID|restricted|SOURCE_UPDATED_AT'`
 
 The terminal now reports the known score contribution and a range for missing evidence. See [calculation, applicability and limits](docs/risk-assessment.md#opentransportdata-road-evidence). Missing shipment route information remains unknown; no route or ETA is invented.
 
-## React map frontend
+## Logistics dashboard
 
-Use Node.js 22.12+ or 24 LTS and npm. From the repository folder:
+The frontend now shows environmental measurement cards, traffic messages, a selectable truck fleet, shipment details, temperature history, priority-score components and MapLibre routes. A visible switch selects Demo or Live evidence.
+
+Use Python 3.10+ and the existing Node.js/npm setup. Build the frontend once:
 
 ```sh
 cd frontend
 npm ci
+npm run build
+cd ..
+```
+
+Start the dashboard server from the repository root:
+
+```sh
+PYTHONPATH=src python3 -m risk_assessment.server
+```
+
+On Windows PowerShell, use the launcher:
+
+```powershell
+.\scripts\start-dashboard.ps1
+```
+
+If your Python executable has a different name or path, pass `-Python <interpreter>`. The Windows launcher keeps TLS verification enabled and uses the installed Git CA bundle when an MSYS Python build lacks a default certificate file. It changes only that process environment.
+
+Open [the local dashboard](http://127.0.0.1:8000). The server uses Python's standard library and serves both the built frontend and `GET /api/dashboard`. It binds to loopback by default; this is a local demo server, not an authenticated public deployment.
+
+For frontend development, leave the backend running and start Vite in a second terminal:
+
+```sh
+cd frontend
 npm run dev
 ```
 
-Open the local URL printed by Vite. No backend or database credentials are needed for the default demo. Internet access is needed for OpenStreetMap tiles.
+Vite proxies `/api` to the backend on port 8000. For another API location, set the public `VITE_API_BASE_URL` in a local frontend .env and restart Vite. Keep database keys on the Python server. The shared browser contract is [interfaces.ts](frontend/src/interfaces.ts); the response validator is [dashboardData.ts](frontend/src/data/dashboardData.ts). The older `GET /api/map` contract remains supported.
 
-```sh
-npm test
-npm run lint
-npm run build
-npm run preview
-```
+### Present the demo
 
-`npm run format` formats the frontend. `npm test` checks TypeScript contracts and API boundary validation. The production output is generated in `frontend/dist/`.
+- Demo starts paused with four synthetic transports: urgent/stuck, normal, delayed with buffer, and a package-temperature deviation. Select a list item or map truck to inspect it.
+- Press **Abspielen** to advance one simulated minute per second. **Pause** freezes the clock; **Neustart** resets the replay.
+- The scenario selector provides normal operation, traffic with buffer, traffic with a critical deadline, temperature deviation and a suitable alternative route. A temperature hold stops the affected demo truck while its synthetic temperature history continues; its ETA is planning-only.
+- The backend reuses the existing thermal, priority and decision policy. Complete Demo evidence can yield 100% coverage; this is completeness of synthetic inputs, not scientific validation.
+- Live reads all five environmental sources from Supabase and displays observation age/freshness. It has no truck GPS or package-temperature feed yet and therefore displays an empty shipment state. Live failures stay visible; they never substitute Demo data.
+- Route polylines and their distances are authored illustrative corridors, not qualified navigation routes. GPS, transport IDs, material, timing and temperatures in Demo mode are synthetic. Map tiles need internet.
 
-### Connect a backend
-
-The single shared map contract is [frontend/src/interfaces.ts](frontend/src/interfaces.ts); HTTP response validation and demo data live in [the adapter](frontend/src/data/mapData.ts). Serve `GET /map` under your API base URL using that JSON contract. Then create a local `frontend/.env`:
-
-```dotenv
-VITE_API_BASE_URL=http://localhost:8000/api
-```
-
-Restart Vite after changing it. The frontend requests `http://localhost:8000/api/map`. For a separate origin, the backend must allow the frontend origin through CORS. All `VITE_` values are public browser configuration: never use credentials here. For deployment, supply the API URL when building and use HTTPS or a same-origin `/api` reverse proxy. Keep backend responses compatible with the contract to avoid UI changes.
-
-Backend failures remain visible with a retry action. The map itself stays available even if the location API is unavailable. The existing [Python requester and database setup](supabase/README.md) remain independent; connecting their results to the map endpoint is a future task.
+Check the frontend with `npm test`, `npm run lint` and `npm run build` from frontend/. Backend/API replay checks are included in the existing root unittest command. Use `npm run format` to format the frontend.
 
 ## Data sources
 
@@ -111,7 +127,7 @@ See [docs/SOURCES.md](docs/SOURCES.md).
 
 ## Limits
 
-Scenario package temperatures are simulated. Supabase weather is a regional observation, not a box sensor; the current ten-record traffic sample is not a route baseline; and river restrictions require a matching ship-leg section. The model has no product-specific stability rules and cannot decide whether goods are safe or damaged. It is a planning demo, not an operational or quality-release system.
+Scenario package temperatures are simulated. Supabase weather is a regional observation, not a box sensor; traffic counts require a comparable route-counter baseline; and river restrictions require a matching ship-leg section. The model has no product-specific stability rules and cannot decide whether goods are safe or damaged. It is a planning demo, not an operational or quality-release system.
 
 ## Team
 

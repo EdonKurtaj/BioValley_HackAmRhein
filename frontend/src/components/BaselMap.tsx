@@ -2,23 +2,37 @@ import { useEffect, useRef, useState } from "react";
 import * as maplibregl from "maplibre-gl";
 import type { Marker } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import type { MapLocation } from "../interfaces";
+import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
+import type { MapLocation, Shipment } from "../interfaces";
 import { BASEL_CENTER, BASEL_ZOOM, categories } from "../config/map";
+import { routePosition } from "../data/routePosition";
+import { actionLabels } from "../config/dashboard";
+
+// Vite must bundle the ESM worker and its shared imports as a separate asset.
+maplibregl.setWorkerUrl(workerUrl);
 
 export function BaselMap({
   locations,
   selectedId,
   onSelect,
   resetKey,
+  shipments,
+  selectedShipmentId,
+  onSelectShipment,
 }: {
   locations: MapLocation[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   resetKey: number;
+  shipments: Shipment[];
+  selectedShipmentId: string | null;
+  onSelectShipment: (id: string) => void;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const markers = useRef(new Map<string, Marker>());
+  const truckMarkers = useRef(new Map<string, Marker>());
+  const previousSelected = useRef<string | null>(null);
   const [tileError, setTileError] = useState(false);
 
   useEffect(() => {
@@ -65,6 +79,8 @@ export function BaselMap({
       observer.disconnect();
       markers.current.forEach((marker) => marker.remove());
       markers.current.clear();
+      truckMarkers.current.forEach((marker) => marker.remove());
+      truckMarkers.current.clear();
       instance.remove();
       map.current = null;
     };
@@ -72,9 +88,19 @@ export function BaselMap({
 
   useEffect(() => {
     if (!map.current) return;
-    markers.current.forEach((marker) => marker.remove());
-    markers.current.clear();
+    const ids = new Set(locations.map((location) => location.id));
+    markers.current.forEach((marker, id) => {
+      if (!ids.has(id)) {
+        marker.remove();
+        markers.current.delete(id);
+      }
+    });
     locations.forEach((location) => {
+      const existing = markers.current.get(location.id);
+      if (existing) {
+        existing.setLngLat([location.longitude, location.latitude]);
+        return;
+      }
       const element = document.createElement("button");
       element.type = "button";
       element.className = "location-marker";
@@ -96,11 +122,138 @@ export function BaselMap({
       element.addEventListener("click", () => onSelect(location.id));
       markers.current.set(location.id, marker);
     });
-    return () => {
-      markers.current.forEach((marker) => marker.remove());
-      markers.current.clear();
-    };
   }, [locations, onSelect]);
+
+  useEffect(() => {
+    const instance = map.current;
+    if (!instance) return;
+    const ids = new Set(shipments.map((shipment) => shipment.id));
+    truckMarkers.current.forEach((marker, id) => {
+      if (!ids.has(id)) {
+        marker.remove();
+        truckMarkers.current.delete(id);
+      }
+    });
+    for (const shipment of shipments) {
+      let marker = truckMarkers.current.get(shipment.id);
+      if (!marker) {
+        const element = document.createElement("button");
+        element.type = "button";
+        const truck = document.createElement("span");
+        truck.className = "truck-symbol";
+        truck.textContent = "▰";
+        const label = document.createElement("span");
+        label.textContent = shipment.id;
+        element.append(truck, label);
+        element.addEventListener("click", () => onSelectShipment(shipment.id));
+        marker = new maplibregl.Marker({ element })
+          .setLngLat(routePosition(shipment.route, shipment.progress))
+          .addTo(instance);
+        truckMarkers.current.set(shipment.id, marker);
+      }
+      marker.setLngLat(routePosition(shipment.route, shipment.progress));
+      marker.getElement().className = `truck-marker action-${shipment.action} ${selectedShipmentId === shipment.id ? "selected" : ""}`;
+      marker
+        .getElement()
+        .setAttribute(
+          "aria-label",
+          `Transport ${shipment.id}: ${actionLabels[shipment.action]}`,
+        );
+      marker
+        .getElement()
+        .setAttribute(
+          "aria-pressed",
+          String(selectedShipmentId === shipment.id),
+        );
+    }
+    const css = getComputedStyle(document.documentElement);
+    const color = (action: Shipment["action"]) =>
+      css
+        .getPropertyValue(
+          action === "quality_review"
+            ? "--danger-ink"
+            : action === "expedite" || action === "buffer"
+              ? "--warning-ink"
+              : "--green",
+        )
+        .trim();
+    const features = shipments.map((shipment) => ({
+      type: "Feature" as const,
+      geometry: { type: "LineString" as const, coordinates: shipment.route },
+      properties: {
+        color: color(shipment.action),
+        selected: shipment.id === selectedShipmentId,
+      },
+    }));
+    const selected = shipments.find(
+      (shipment) => shipment.id === selectedShipmentId,
+    );
+    const alternate = {
+      type: "FeatureCollection" as const,
+      features: selected?.alternativeRoute.length
+        ? [
+            {
+              type: "Feature" as const,
+              geometry: {
+                type: "LineString" as const,
+                coordinates: selected.alternativeRoute,
+              },
+              properties: {},
+            },
+          ]
+        : [],
+    };
+    function updateRoutes() {
+      const data = { type: "FeatureCollection" as const, features };
+      const source = instance!.getSource("shipments") as
+        maplibregl.GeoJSONSource | undefined;
+      if (source) source.setData(data);
+      else {
+        instance!.addSource("shipments", { type: "geojson", data });
+        instance!.addLayer({
+          id: "shipment-routes",
+          type: "line",
+          source: "shipments",
+          paint: {
+            "line-color": ["get", "color"],
+            "line-width": ["case", ["get", "selected"], 6, 3],
+            "line-opacity": ["case", ["get", "selected"], 0.9, 0.45],
+          },
+          layout: { "line-join": "round", "line-cap": "round" },
+        });
+      }
+      const alternativeSource = instance!.getSource("alternative") as
+        maplibregl.GeoJSONSource | undefined;
+      if (alternativeSource) alternativeSource.setData(alternate);
+      else {
+        instance!.addSource("alternative", {
+          type: "geojson",
+          data: alternate,
+        });
+        instance!.addLayer({
+          id: "alternative-route",
+          type: "line",
+          source: "alternative",
+          paint: {
+            "line-color": css.getPropertyValue("--water-ink").trim(),
+            "line-width": 4,
+            "line-dasharray": [2, 2],
+          },
+        });
+      }
+    }
+    if (instance.isStyleLoaded()) updateRoutes();
+    instance.on("load", updateRoutes);
+    if (selected && previousSelected.current !== selected.id) {
+      const bounds = new maplibregl.LngLatBounds();
+      selected.route.forEach((point) => bounds.extend(point));
+      instance.fitBounds(bounds, { padding: 75, maxZoom: 12, duration: 600 });
+    }
+    previousSelected.current = selected?.id ?? null;
+    return () => {
+      instance.off("load", updateRoutes);
+    };
+  }, [shipments, selectedShipmentId, onSelectShipment]);
 
   useEffect(() => {
     const marker = selectedId ? markers.current.get(selectedId) : undefined;
