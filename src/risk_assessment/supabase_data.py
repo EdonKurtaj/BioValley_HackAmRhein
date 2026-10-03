@@ -12,12 +12,16 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from .interfaces import TrafficCounterMatch
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_ID = "meteoswiss_basel_temperature"
 STATION_ID = "BAS"
 REQUEST_TIMEOUT_SECONDS = 15
 ROW_LIMIT = 100
 PAGE_SIZE = 1000
+TRAFFIC_CONTEXT_LIMIT = 100
+TRAFFIC_BASELINE_LIMIT = 52  # At most 52 comparable weekday/hour bins per route counter.
 
 
 def _load_local_settings(project_root: Path = PROJECT_ROOT) -> None:
@@ -82,17 +86,22 @@ def _credentials(project_root: Path) -> tuple[str, str]:
     return url, key
 
 
-def _observations(url: str, key: str, source_id: str, limit: int | None = None) -> list[dict]:
+def _observations(url: str, key: str, source_id: str, limit: int = 500,
+                  *, filters: dict | None = None) -> list[dict]:
+    """Read a bounded observation set; callers may restrict station/bin/metric."""
+    if not isinstance(limit, int) or limit < 1:
+        raise ValueError("observation limit must be a positive integer")
     rows: list[dict] = []
     offset = 0
-    while limit is None or len(rows) < limit:
-        page_limit = PAGE_SIZE if limit is None else min(PAGE_SIZE, limit - len(rows))
+    while len(rows) < limit:
+        page_limit = min(PAGE_SIZE, limit - len(rows))
         page = _get_json(url, key, "observations", {
             "select": "fetch_run_id,station_id,station_name,observation_key,observed_at,metric,value,unit,dimensions,raw_record",
             "source_id": f"eq.{source_id}",
-            "order": "observed_at.desc",
+            "order": "observed_at.desc,id.desc",
             "limit": str(page_limit),
             "offset": str(offset),
+            **(filters or {}),
         })
         if not isinstance(page, list):
             raise ValueError(f"Supabase observations for {source_id} must be a list")
@@ -101,6 +110,29 @@ def _observations(url: str, key: str, source_id: str, limit: int | None = None) 
             break
         offset += len(page)
     return rows
+
+
+def _traffic_history(url: str, key: str, counters: tuple[TrafficCounterMatch, ...]) -> list[dict]:
+    """Fetch only each selected counter's latest total and comparable older bins."""
+    rows = []
+    for counter in dict.fromkeys(counters):
+        filters = {"metric": "eq.total", "station_id": f"eq.{counter.sitecode}",
+                   "dimensions->>directionname": f"eq.{counter.directionname}",
+                   "dimensions->>lanecode": f"eq.{counter.lanecode}"}
+        current = _observations(url, key, "basel_dataset_100006", limit=1, filters=filters)
+        rows.extend(current)
+        if not current:
+            continue
+        latest = current[0]
+        raw = latest.get("raw_record") or {}
+        stamp = _observation_time(latest.get("observed_at"))
+        if stamp is None or raw.get("weekday") is None or raw.get("hourfrom") is None:
+            continue  # Missing bin metadata cannot establish a comparable baseline.
+        rows.extend(_observations(url, key, "basel_dataset_100006", limit=TRAFFIC_BASELINE_LIMIT,
+                                  filters={**filters, "observed_at": f"lt.{stamp.isoformat()}",
+                                           "raw_record->>weekday": f"eq.{raw['weekday']}",
+                                           "raw_record->>hourfrom": f"eq.{raw['hourfrom']}"}))
+    return _unique_raw_records(rows)
 
 
 def _latest_run(url: str, key: str, source_id: str, *, successful: bool = True) -> dict | None:
@@ -201,13 +233,15 @@ def _port_thresholds(payload: object) -> list[dict]:
     return thresholds
 
 
-def fetch_supabase_sources(project_root: Path = PROJECT_ROOT) -> dict:
+def fetch_supabase_sources(project_root: Path = PROJECT_ROOT, *,
+                           traffic_counters: tuple[TrafficCounterMatch, ...] = ()) -> dict:
     """Fetch every source consumed by the assessment; never fall back to local archives."""
     url, key = _credentials(project_root)
     snapshots = {SOURCE_ID: _weather_snapshot(url, key)}
 
     traffic_id = "basel_dataset_100006"
-    traffic_rows = _observations(url, key, traffic_id)
+    traffic_rows = _observations(url, key, traffic_id, limit=TRAFFIC_CONTEXT_LIMIT,
+                                 filters={"metric": "eq.total"})
     traffic_results = _unique_raw_records(traffic_rows)
     traffic_results.sort(key=lambda row: _observation_time(row.get("datetimefrom")) or datetime.min.replace(tzinfo=timezone.utc),
                          reverse=True)
@@ -217,7 +251,7 @@ def fetch_supabase_sources(project_root: Path = PROJECT_ROOT) -> dict:
         "checked_at": (traffic_run or {}).get("fetched_at"),
         "data": {"results": traffic_results,
                  "total_count": ((traffic_run or {}).get("raw_payload") or {}).get("total_count")},
-        "history_results": traffic_results,
+        "history_results": _traffic_history(url, key, traffic_counters),
         "storage": "Supabase observations",
     }
 

@@ -21,6 +21,8 @@ Every request also produces operational metadata: fetch time, HTTP status, succe
 
 The risk engine reads the newest stored Basel-Rheinhalle `water_level` observation independently of the latest Port HTTP fetch. A failed normalization or interrupted observation upload therefore does not hide the preceding measurement. Its original `observed_at` still determines freshness; a new fetch never makes an old measurement current. If no observation exists, the gauge remains unknown. `request_ok` describes HTTP fetch success; normalization failures remain in the error field and are reported as failures in the collector output.
 
+Traffic reads are bounded: dashboard/context requests select the latest 100 `total` observations, without loading the historical archive. CLI assessments with explicit `--traffic-counter` mappings additionally query each selected counter's newest total and at most 52 older observations matching its direction, lane, weekday and hour. These filters run in Supabase, before row limits are applied, so unrelated recent counters cannot crowd out a selected counter's baseline. Missing comparable history remains unknown under the existing minimum-baseline rule. Stored observations are not deleted; the assessment uses this recent bounded comparison set.
+
 ## Tables and flow
 
 1. `data_sources` catalogs the six inputs.
