@@ -133,6 +133,8 @@ class IngestionTests(unittest.TestCase):
         self.assertEqual(batch["fetch_run"]["raw_payload"], result["data"])
         self.assertIn("Normalization", batch["fetch_run"]["error"])
         self.assertEqual(batch["observations"], [])
+        self.assertTrue(batch["fetch_run"]["request_ok"])  # HTTP success remains distinct from normalization.
+        self.assertNotIn("OK — fetch logged", self.output.getvalue())
 
     def test_partial_database_write_retries_without_duplicate_fetches(self):
         class MemoryClient(SupabaseRestClient):

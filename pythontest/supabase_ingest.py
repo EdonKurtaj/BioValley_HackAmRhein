@@ -152,7 +152,10 @@ class SupabaseIngestor:
     def _deliver(self, pending: Path, batch: IngestionBatch) -> None:
         self.client.write_batch(batch)
         pending.unlink()
-        print(f"Supabase {batch['source']['id']}: OK — fetch logged, {len(batch['observations'])} observations", flush=True)
+        if batch["normalization_error"]:
+            print(f"Supabase {batch['source']['id']}: normalization FAILED — fetch and raw payload logged, no observations", flush=True)
+        else:
+            print(f"Supabase {batch['source']['id']}: OK — fetch logged, {len(batch['observations'])} observations", flush=True)
 
     def flush(self) -> None:
         if not self.outbox.exists():

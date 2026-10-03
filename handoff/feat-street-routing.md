@@ -1,6 +1,6 @@
 # Street routing for the frontend demo
 
-Status: done; verified locally, ready for review
+Status: done; reviewed and verified with updated main
 
 ## Goal
 
@@ -18,16 +18,17 @@ Follow actual streets with MapLibre GL Directions and demonstrate a continuous t
 - Reviewed frontend and routing: autoplay on initial load/scenario/restart, Play restarts completed replays, clock accounts for elapsed seconds, and restart resets the attention filter.
 - Preserve marker progress on looping/repeated road geometry; scenario reset does not animate backwards. Incident selection no longer recentres the map on every poll or rebuilds unchanged popups.
 - Correct remaining route time by subtracting the shared travelled prefix; hide unsuitable alternatives. A hold before rerouting prevents switching; a later hold freezes on the active alternative and keeps quality review prominent.
+- Combined updated main bb37917 without conflicts, preserving the multiple-counter, one-minute traffic polling, bounded Supabase reads and valid Port observation fixes. The user explicitly requested this frontend/main integration.
 
 ## Verification
 
-- All 112 backend tests and 23 frontend tests pass; TypeScript, formatting, production build and documentation checks pass.
+- Combined version: all 127 backend tests, 59 collector tests and 23 frontend tests pass; TypeScript, formatting, production build, documentation and privacy checks pass.
 - Browser checked: street paths render, reroute switches at five replay minutes with updated ETA, restart restores the primary path, and no console errors were reported.
 - Server restarted on port 8001; browser verification must leave the replay playing. Initial load, scenario selection and restart continue automatically.
 
 ## Next
 
-- Review the feature branch and merge only after explicit approval.
+- Complete the explicitly requested main integration and push; keep the feature branch for recovery.
 - To connect observed incidents later, provide verified remaining-route edge matches and suitable truck paths; do not apply regional alerts automatically.
 
 ## Limits
