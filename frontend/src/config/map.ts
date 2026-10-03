@@ -1,5 +1,5 @@
-// Initial viewport and illustrative locations, not measured station positions.
-export const BASEL_CENTER: [number, number] = [47.5596, 7.5886];
+// MapLibre uses [longitude, latitude]; locations are illustrative, not measured.
+export const BASEL_CENTER: [number, number] = [7.5886, 47.5596];
 export const BASEL_ZOOM = 13;
 export const categories = {
   port: { label: "Logistik", symbol: "↗" },

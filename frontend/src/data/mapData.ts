@@ -34,7 +34,7 @@ export const demoSnapshot: MapSnapshot = {
   ],
 };
 
-/** Validate external JSON before it reaches Leaflet or the UI. */
+/** Validate external JSON before it reaches the map or the UI. */
 export function parseSnapshot(value: unknown): MapSnapshot {
   if (!value || typeof value !== "object")
     throw new Error("Ungültige Kartendaten.");

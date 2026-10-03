@@ -405,11 +405,22 @@ footer {
 .footer-dot {
   padding: 0 8px;
 }
-.leaflet-container {
+.maplibregl-map {
   font-family: inherit;
 }
-.leaflet-control-attribution {
+.maplibregl-ctrl-attrib {
   font-size: 9px !important;
+}
+.location-marker {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.location-marker:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 3px;
+  border-radius: 50%;
 }
 @media (min-width: 1500px) {
   .workspace,

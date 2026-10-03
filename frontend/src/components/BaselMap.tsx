@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
+import * as maplibregl from "maplibre-gl";
+import type { Marker } from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
 import type { MapLocation } from "../interfaces";
 import { BASEL_CENTER, BASEL_ZOOM, categories } from "../config/map";
 
@@ -16,32 +17,54 @@ export function BaselMap({
   resetKey: number;
 }) {
   const container = useRef<HTMLDivElement>(null);
-  const map = useRef<L.Map | null>(null);
-  const markers = useRef(new Map<string, L.Marker>());
+  const map = useRef<maplibregl.Map | null>(null);
+  const markers = useRef(new Map<string, Marker>());
   const [tileError, setTileError] = useState(false);
 
   useEffect(() => {
     if (!container.current) return;
-    const instance = L.map(container.current, { zoomControl: false }).setView(
-      BASEL_CENTER,
-      BASEL_ZOOM,
-    );
-    map.current = instance;
-    L.control.zoom({ position: "bottomright" }).addTo(instance);
-    L.control
-      .scale({ imperial: false, position: "bottomleft" })
-      .addTo(instance);
-    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    const instance = new maplibregl.Map({
+      container: container.current,
+      center: BASEL_CENTER,
+      zoom: BASEL_ZOOM,
       maxZoom: 19,
-      attribution:
-        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-    })
-      .on("tileerror", () => setTileError(true))
-      .addTo(instance);
-    const observer = new ResizeObserver(() => instance.invalidateSize());
+      style: {
+        version: 8,
+        sources: {
+          osm: {
+            type: "raster",
+            tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+            tileSize: 256,
+            attribution:
+              '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+          },
+        },
+        layers: [{ id: "osm", type: "raster", source: "osm" }],
+      },
+      attributionControl: false,
+    });
+    map.current = instance;
+    instance.addControl(new maplibregl.NavigationControl(), "bottom-right");
+    instance.addControl(
+      new maplibregl.ScaleControl({ unit: "metric" }),
+      "bottom-left",
+    );
+    instance.addControl(
+      new maplibregl.AttributionControl({ compact: true }),
+      "bottom-right",
+    );
+    instance.on(
+      "error",
+      (event: maplibregl.ErrorEvent & { sourceId?: string }) => {
+        if (event.sourceId === "osm") setTileError(true);
+      },
+    );
+    const observer = new ResizeObserver(() => instance.resize());
     observer.observe(container.current);
     return () => {
       observer.disconnect();
+      markers.current.forEach((marker) => marker.remove());
+      markers.current.clear();
       instance.remove();
       map.current = null;
     };
@@ -49,28 +72,32 @@ export function BaselMap({
 
   useEffect(() => {
     if (!map.current) return;
-    const group = L.layerGroup().addTo(map.current);
+    markers.current.forEach((marker) => marker.remove());
     markers.current.clear();
     locations.forEach((location) => {
-      const icon = L.divIcon({
-        className: "location-marker",
-        html: `<span class="pin pin-${location.category}">${categories[location.category].symbol}</span>`,
-        iconSize: [40, 40],
-        iconAnchor: [20, 20],
-      });
-      const popup = document.createElement("strong");
-      popup.textContent = location.name;
-      const marker = L.marker([location.latitude, location.longitude], {
-        icon,
-        title: location.name,
-      })
-        .bindPopup(popup)
-        .on("click", () => onSelect(location.id))
-        .addTo(group);
+      const element = document.createElement("button");
+      element.type = "button";
+      element.className = "location-marker";
+      element.setAttribute("aria-label", location.name);
+      const pin = document.createElement("span");
+      pin.className = `pin pin-${location.category}`;
+      pin.textContent = categories[location.category].symbol;
+      element.append(pin);
+
+      const popupContent = document.createElement("strong");
+      popupContent.textContent = location.name;
+      const popup = new maplibregl.Popup({ offset: 22 }).setDOMContent(
+        popupContent,
+      );
+      const marker = new maplibregl.Marker({ element, anchor: "bottom" })
+        .setLngLat([location.longitude, location.latitude])
+        .setPopup(popup)
+        .addTo(map.current!);
+      element.addEventListener("click", () => onSelect(location.id));
       markers.current.set(location.id, marker);
     });
     return () => {
-      group.remove();
+      markers.current.forEach((marker) => marker.remove());
       markers.current.clear();
     };
   }, [locations, onSelect]);
@@ -78,13 +105,14 @@ export function BaselMap({
   useEffect(() => {
     const marker = selectedId ? markers.current.get(selectedId) : undefined;
     if (marker) {
-      map.current?.panTo(marker.getLatLng());
-      marker.openPopup();
-    } else map.current?.closePopup();
+      const coordinates = marker.getLngLat();
+      map.current?.easeTo({ center: coordinates, duration: 500 });
+      if (!marker.getPopup()?.isOpen()) marker.togglePopup();
+    } else markers.current.forEach((item) => item.getPopup().remove());
   }, [selectedId, locations]);
 
   useEffect(() => {
-    map.current?.setView(BASEL_CENTER, BASEL_ZOOM);
+    map.current?.easeTo({ center: BASEL_CENTER, zoom: BASEL_ZOOM });
   }, [resetKey]);
 
   return (
@@ -96,8 +124,8 @@ export function BaselMap({
       />
       {tileError && (
         <div className="tile-warning" role="status">
-          Kartenbilder konnten nicht vollständig geladen werden. Bitte
-          Internetverbindung prüfen und die Seite neu laden.
+          Einige OpenStreetMap-Kartenausschnitte konnten nicht geladen werden.
+          Bitte Internetverbindung prüfen und die Seite neu laden.
         </div>
       )}
     </>
