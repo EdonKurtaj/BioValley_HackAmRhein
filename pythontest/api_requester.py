@@ -7,6 +7,7 @@ import argparse
 import csv
 import io
 import json
+import math
 import os
 import re
 import sys
@@ -20,6 +21,7 @@ from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
 from interfaces import IngestionSink
+from weather_parameters import WEATHER_PARAMETERS
 
 
 ROOT = Path(__file__).resolve().parent
@@ -284,21 +286,21 @@ def check_meteoswiss_current(source: dict) -> dict:
                 raise ValueError(f"Station {source['station_id']} not present in current-values CSV")
             observed_utc = datetime.strptime(row["Date"].strip(), "%Y%m%d%H%M").replace(tzinfo=timezone.utc)
             observed_local = observed_utc.astimezone(ZoneInfo("Europe/Zurich"))
-            temperature = parse_csv_value(row.get("tre200s0", ""))
-            if not isinstance(temperature, (int, float)):
-                raise ValueError("Current temperature value tre200s0 is missing")
+            measurements = {}
+            for metric in WEATHER_PARAMETERS:
+                value = parse_csv_value(row.get(metric, ""))
+                measurements[metric] = value if isinstance(value, (int, float)) and math.isfinite(value) else None
+            if not any(value is not None for value in measurements.values()):
+                raise ValueError("No valid current weather measurements for BAS")
             station.update({
                 "observed_at_utc": observed_utc.isoformat().replace("+00:00", "Z"),
                 "observed_at": observed_local.isoformat(timespec="minutes"),
                 "time_zone": "Europe/Zurich",
                 "age_minutes_at_fetch": round((datetime.now(timezone.utc) - observed_utc).total_seconds() / 60, 1),
-                "measurements": {"tre200s0": temperature},
+                "measurements": measurements,
+                "missing_measurements": [metric for metric, value in measurements.items() if value is None],
             })
-            parameter_metadata = {"tre200s0": {
-                "name_de": "Lufttemperatur 2 m über Boden; Momentanwert",
-                "name_en": "Air temperature 2 m above ground; current value",
-                "unit": "°C",
-            }}
+            parameter_metadata = {metric: dict(metadata) for metric, metadata in WEATHER_PARAMETERS.items()}
         except (UnicodeError, csv.Error, KeyError, ValueError) as exc:
             error = f"Could not parse MeteoSwiss current-values CSV: {exc}"
     rate_limited = status == 429
@@ -335,7 +337,11 @@ def check_meteoswiss_current(source: dict) -> dict:
         status_line = "FAILED — could not save response"
     elif result["request_ok"]:
         temp = station["measurements"]["tre200s0"]
-        status_line = f"OK — HTTP {status} — {temp} °C at {station['observed_at']} ({station['age_minutes_at_fetch']} min old; Europe/Zurich)"
+        if temp is not None:
+            status_line = f"OK — HTTP {status} — {temp} °C at {station['observed_at']} ({station['age_minutes_at_fetch']} min old; Europe/Zurich)"
+        else:
+            count = sum(value is not None for value in station["measurements"].values())
+            status_line = f"OK — HTTP {status} — {count} weather values at {station['observed_at']} (temperature unavailable; Europe/Zurich)"
     else:
         status_line = f"FAILED — HTTP {status or 'connection error'} — {error}"
     print(f"{source['name']}: {status_line}", flush=True)

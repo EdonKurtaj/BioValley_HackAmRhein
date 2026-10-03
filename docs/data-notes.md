@@ -27,6 +27,12 @@ The traffic request remains unchanged at `limit=10`, ordered by `-datetimefrom`.
 
 The requester continues to read the current-values CSV directly. The old STAC station-fetch function, parameter-metadata loader, and metadata URL constant were removed after a repository search found no external callers. `parse_csv_value`, `csv`, `io`, `ZoneInfo`, and `re` remain in use.
 
+The collector now retains nine requested weather metrics for BAS: air temperature, precipitation, global radiation, sunshine duration, mean wind speed, peak gust, wind direction, relative humidity, and dew point. [weather_parameters.py](../pythontest/weather_parameters.py) is the home for parameter identifiers, units, and aggregation windows, verified against the official [MeteoSwiss documentation](https://opendatadocs.meteoswiss.ch/a-data-groundbased/a1-automatic-weather-stations) and parameter metadata CSV.
+
+All available metrics use the source's observation timestamp, not the request time. Missing or non-finite values are retained as null in the local payload and listed under `missing_measurements`; they create no Supabase observations. Valid zero values remain measurements. A partially available weather row remains usable, including when temperature is missing; a row with no valid requested measurements is marked failed. Observation dimensions record aggregation and, where applicable, the ten-minute interval. The existing source ID is retained to preserve the temperature series.
+
+Live validation on 2026-10-03 confirmed all nine metrics in the source response and in Supabase for the 10:00 UTC observation (12:00 Europe/Zurich). No schema change was needed. Restart an already running collector after updating the code; a process that imported the older code continues collecting only temperature until restarted.
+
 The live `--once` run completed with HTTP 200 for all five sources and successful port transformation. MeteoSwiss still prints temperature, the observation time in Europe/Zurich, and measurement age in the same format; an offline test checks the exact status line with a fixed clock.
 
 ## Port number formats

@@ -64,8 +64,10 @@ def normalize_meteo(result: FetchResult) -> list[Observation]:
     timestamp = utc_time(station["observed_at_utc"])
     rows = []
     for metric, value in station["measurements"].items():
+        metadata = data["parameter_metadata"][metric]
+        dimensions = {key: metadata[key] for key in ("aggregation", "interval_minutes") if key in metadata}
         row = observation(result, station["station_id"], station.get("station_name"), timestamp,
-                          metric, value, data["parameter_metadata"][metric]["unit"], station)
+                          metric, value, metadata["unit"], station, dimensions)
         if row:
             rows.append(row)
     return rows

@@ -30,4 +30,5 @@ python3 -m unittest discover -s pythontest -p 'test_api*.py' -v
 python3 -m unittest discover -s pythontest -p test_transform_port_pegel.py -v
 python3 -m unittest discover -s pythontest -p test_parse_swiss_number.py -v
 python3 -m unittest discover -s pythontest -p test_supabase_ingest.py -v
+python3 -m unittest discover -s pythontest -p test_weather_observations.py -v
 ```

@@ -10,7 +10,7 @@ Configure `SUPABASE_URL` and `SUPABASE_SECRET_KEY` in the project's local `.env`
 
 | Source ID | What is fetched | Best fit in this schema |
 | --- | --- | --- |
-| `meteoswiss_basel_temperature` | Current Basel/Binningen (BAS) air temperature `tre200s0` in °C, observation time, station metadata, age at fetch, and parameter metadata | A `fetch_runs` row plus an `observations` row (`metric = tre200s0`, station `BAS`) |
+| `meteoswiss_basel_temperature` | Nine current Basel/Binningen (BAS) weather metrics, observation time, station metadata, age at fetch, and parameter metadata | A fetch log plus one observation per available weather metric; units and aggregation windows come from [weather_parameters.py](../pythontest/weather_parameters.py) |
 | `basel_dataset_100006` | JSON records from Basel motor traffic API, limited to latest 10 records ordered by `datetimefrom` | Each count field is its own metric in vehicles; station, lane, direction, interval end and traffic type distinguish observation identities |
 | `basel_dataset_100089` | JSON records from Basel Rhine API; window documented in [data notes](../docs/data-notes.md) | `abfluss` in m3/s, `pegelhoehe` in cm, and `pegel` in m; observation time comes from `timestamp` |
 | `port_pegel_current` | Port page headings, tables and visible text; raw HTML is also saved locally | Gauge readings become `water_level` in the published units and Europe/Zurich observation time; flood thresholds remain in the raw payload |
@@ -34,7 +34,7 @@ Each new source attempt produces a `fetch_runs` row, including HTTP/network erro
 
 Before transmission, each new attempt and its observations are written atomically to `.hack/ingest-outbox/`. Database failures keep that batch pending; the next cycle retries pending batches before fetching again. A stable UUID makes repeated `fetch_runs` delivery idempotent. Observation upserts use `(source_id, observation_key, metric)`; traffic lanes remain separate and forecast issues retain separate identities. A batch is removed only after all database writes succeed. Writes to fetch_runs and observations are separate REST requests; the fetch can become visible before all observations have arrived.
 
-The existing local JSON/JSONL/HTML archives remain active. No historical files are backfilled; retries concern only new attempts captured by this integration. If the local disk cannot save a pending batch, the collector reports the storage failure and continues, but automatic database retry cannot be guaranteed for that attempt. The rolling source windows remain limited; see [data request notes](../docs/data-notes.md). MeteoSwiss still provides only the current temperature metric.
+The existing local JSON/JSONL/HTML archives remain active. No historical files are backfilled; retries concern only new attempts captured by this integration. If the local disk cannot save a pending batch, the collector reports the storage failure and continues, but automatic database retry cannot be guaranteed for that attempt. The rolling source windows remain limited; see [data request notes](../docs/data-notes.md).
 
 The ingestion contracts live in [interfaces.py](../pythontest/interfaces.py), mappings in [normalize_observations.py](../pythontest/normalize_observations.py), and delivery/retry logic in [supabase_ingest.py](../pythontest/supabase_ingest.py).
 
