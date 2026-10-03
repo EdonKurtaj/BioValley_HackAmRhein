@@ -2,7 +2,7 @@
 
 ## State
 
-Code implemented and tested on `feat/local-risk-assessment`. Live database delivery awaits execution of the existing source-kind migration in Supabase; no SQL administration connection is configured locally.
+Done on `feat/local-risk-assessment`. The user applied the source-kind migration in Supabase, and live delivery was verified.
 
 ## Done
 
@@ -16,6 +16,12 @@ Code implemented and tested on `feat/local-risk-assessment`. Live database deliv
 
 ## Next
 
-1. Execute `supabase/migrations/20261003190000_allow_opentransportdata_source_kind.sql` in this project's Supabase SQL Editor. The user has been asked to do this.
-2. Flush pending batches using the existing Supabase ingestor, then verify `fetch_runs` and `observations` for source `opentransportdata_basel_region` through the REST API.
-3. Restart any existing traffic watcher to load the new ingestion code. The new feed is not yet wired into risk scoring; this task concerns storage.
+1. Restart any existing traffic watcher to load the new ingestion code.
+2. The new feed is not yet wired into risk scoring; route matching and comparable baselines are separate work.
+
+## Live acceptance
+
+- The pending batch delivered successfully: 946 observations and its fetch log.
+- REST read-back confirmed vehicle-flow values in vehicles/hour and speeds in km/h at the source measurement time, with a successful fetch log and no error.
+- The durable outbox is empty after successful delivery.
+- Commit `c6f8c02` remains local because the user declined the push.
