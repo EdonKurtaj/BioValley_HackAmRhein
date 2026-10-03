@@ -12,6 +12,11 @@ SYSTEM_BUFFER_THRESHOLD = 20.0
 SYSTEM_EXPEDITE_THRESHOLD = 50.0
 SYSTEM_URGENCY_EXPEDITE_THRESHOLD = 70.0
 SYSTEM_NORMAL_MIN_COVERAGE = 50.0
+QUALITY_HOLD_REASON = (
+    "Package-temperature evidence is missing, uncertain, incomplete, or outside its handling band. "
+    "Keep the material in controlled storage and hold for qualified review; "
+    "onward delivery and production use remain blocked until authorized release."
+)
 
 
 def decide_action(thermal: ExposureMetrics | None, route: RouteEvidence) -> Assessment:
@@ -24,8 +29,7 @@ def decide_action(thermal: ExposureMetrics | None, route: RouteEvidence) -> Asse
         if timestamp is not None and (timestamp.tzinfo is None or timestamp.utcoffset() is None):
             raise ValueError("logistics timestamps must include a timezone")
     if thermal is None or thermal.quality_review_required:
-        reason = "Package-temperature evidence is out of range, uncertain, incomplete, or missing; hold for qualified review."
-        return Assessment("quality_review", reason, "review required", "separate route assessment", thermal, route.evidence)
+        return Assessment("quality_review", QUALITY_HOLD_REASON, "review required", "onward delivery blocked", thermal, route.evidence)
 
     if route.route_restricted and route.alternate_route_available:
         return Assessment("reroute", "A route restriction is reported and a feasible alternate route is available.",
@@ -57,8 +61,8 @@ def suggest_system_action(
     priority: PriorityScore,
 ) -> dict[str, str]:
     """Map the weighted score and hard safety/logistics triggers to one suggestion."""
-    quality_review = thermal is None or thermal.quality_review_required
-    quality_reason = "Package-temperature evidence is missing, uncertain, incomplete, or outside its handling band."
+    if thermal is None or thermal.quality_review_required:
+        return {"suggestion": "Quality review", "reason": QUALITY_HOLD_REASON}
     if route.route_restricted and route.alternate_route_available:
         logistics_suggestion = "Reroute"
         logistics_reason = "A matching route restriction is present and a feasible alternate route is available."
@@ -86,12 +90,6 @@ def suggest_system_action(
                 logistics_suggestion = "Normal"
                 logistics_reason = "Combined score is below the intervention thresholds and evidence coverage is adequate."
 
-    if quality_review:
-        if logistics_suggestion in ("Reroute", "Expedite", "Buffer"):
-            return {"suggestion": f"Quality review + {logistics_suggestion}",
-                    "reason": f"{quality_reason} {logistics_reason}"}
-        return {"suggestion": "Quality review",
-                "reason": f"{quality_reason} {logistics_reason}"}
     return {"suggestion": logistics_suggestion, "reason": logistics_reason}
 
 

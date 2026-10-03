@@ -16,7 +16,7 @@ Implemented on `feat/local-risk-assessment`; calculations run from saved request
 - The CLI now defaults to observed-data-only mode; package/route scenarios require `--scenario`. The current score excludes stale weather/traffic and Rhine without a supplied ship leg; last-observation weather context remains visible but is not treated as current.
 - Scenario CLI output now defaults to a readable summary that prints `Current Risk Score: X/100`, evidence-group coverage and score-weight coverage separately; `--output-format json` preserves the structured score bounds and coverage for dashboard use.
 - Scenario score weights are now thermal 50%, urgency 30%, route 20%; observed weights are weather context 40%, urgency 35%, Rhine 15%, traffic 10%. CLI output includes a separate `System Suggestion` derived from score thresholds and route/urgency triggers.
-- Suggestion bands: ≥50 score or ≥70 urgency component => Expedite; ≥20 score or a route disturbance => Buffer; fewer than half the evidence groups available => Monitor; otherwise Normal. Feasible alternate on a matching restriction => Reroute. A package quality-review condition is combined with the operational recommendation (for example, `Quality review + Expedite`).
+- Suggestion bands: ≥50 score or ≥70 urgency component => Expedite; ≥20 score or a route disturbance => Buffer; fewer than half the evidence groups available => Monitor; otherwise Normal. Feasible alternate on a matching restriction => Reroute. A package quality-review condition now overrides every operational recommendation. Both decision outputs require controlled storage and block onward delivery/production use until authorized release.
 - Coverage now counts usable input groups (four in observed mode, three in scenario mode); score-weight coverage is reported separately. The observed CLI's `Data review` lists considered versus omitted/context-only inputs with reasons, and JSON includes `data_review` and `evidence_coverage`.
 
 ## Next
@@ -27,3 +27,9 @@ Implemented on `feat/local-risk-assessment`; calculations run from saved request
 - Connect temperature sensor series and route ETA evidence through the shared contracts; then design authenticated tenant access before any customer data is stored/read in a client.
 - The terminal dashboard is a logic demo, not yet a web factory dashboard; build/wire the UI after the team chooses its presentation approach.
 - Choose a Python environment manager (pixi preferred, optional) when the team wants a reproducible project environment; current backend uses only the standard library.
+
+## Quality-hold correction — done
+
+- Shared hold wording and early return prevent score, deadline, or alternate-route triggers from producing combined delivery recommendations.
+- Regression tests cover measured 10 °C exposure with ample slack, missing/uncertain/incomplete evidence, deadline/restriction overrides, and unaffected logistics paths.
+- Remaining review findings are outside this correction; the four existing score-weight test failures remain to be addressed separately.
