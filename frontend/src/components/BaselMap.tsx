@@ -162,10 +162,11 @@ export function BaselMap({
         truck.className = "truck-symbol";
         truck.textContent = "▰";
         const label = document.createElement("span");
+        label.className = "truck-label";
         label.textContent = shipment.id;
         element.append(truck, label);
         element.addEventListener("click", () => onSelectShipment(shipment.id));
-        const marker = new maplibregl.Marker({ element })
+        const marker = new maplibregl.Marker({ element, anchor: "center" })
           .setLngLat(routePosition(shipment.route, shipment.progress))
           .addTo(instance);
         truckState = {

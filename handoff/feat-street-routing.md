@@ -18,6 +18,8 @@ Follow actual streets with MapLibre GL Directions and demonstrate a continuous t
 - Reviewed frontend and routing: autoplay on initial load/scenario/restart, Play restarts completed replays, clock accounts for elapsed seconds, and restart resets the attention filter.
 - Preserve marker progress on looping/repeated road geometry; scenario reset does not animate backwards. Incident selection no longer recentres the map on every poll or rebuilds unchanged popups.
 - Correct remaining route time by subtracting the shared travelled prefix; hide unsuitable alternatives. A hold before rerouting prevents switching; a later hold freezes on the active alternative and keeps quality review prominent.
+- Center truck symbols directly on their geographic road point, with each ID badge centered above the symbol so badge width no longer shifts the vehicle icon.
+- Checked the built demo at a zoomed-out Basel view; the four truck symbols sit on their route lines while the labels stay legible. Frontend lint and build pass.
 - Combined updated main bb37917 without conflicts, preserving the multiple-counter, one-minute traffic polling, bounded Supabase reads and valid Port observation fixes. The user explicitly requested this frontend/main integration.
 
 ## Verification
