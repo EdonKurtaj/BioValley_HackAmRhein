@@ -1,9 +1,9 @@
-# Simplify README startup
+# Short project README
 
 State: ready for review and merge approval.
 
-Goal: make the presentation launcher the first run instruction.
+Done: replaced the long README with a concise project description, intended audience, synthetic dashboard screenshot, one-command launcher, essential prerequisites, sources, limits and GitHub team usernames. Detailed design, calculation and configuration information is linked to its existing home. No application code changed.
 
-Done: README starts with Python/Node prerequisites and one launcher command, includes Windows usage, Demo/Live requirements, stopping and port options. Detailed CLI and development instructions remain below. Strict documentation check and diff whitespace check pass. Launcher and clean frontend installation/build were verified during the release audit.
+Validation: strict documentation check, whitespace check and full privacy scan pass. Launcher and clean frontend installation/build were verified in the release audit. Screenshot contains synthetic shipment data and public map attribution.
 
-Next: review and merge the documentation PR only after explicit approval. No application code changed.
+Next: create and review the documentation PR; merge only after explicit approval.
