@@ -10,6 +10,22 @@ A Basel-area factory needs a critical refrigerated material on time while preser
 
 ## How to run it
 
+Install **Python 3.10+** and **Node.js with npm**, then open a terminal in the downloaded or cloned repository folder and run:
+
+```sh
+python3 scripts/start-presentation.py
+```
+
+On Windows, use `python scripts/start-presentation.py` instead.
+
+The launcher installs the declared frontend dependencies on the first run, builds the dashboard, starts the local server and data collector, and opens your browser. Select **Demo-Feed** to explore the synthetic shipment scenarios; no credentials are needed for Demo mode. Internet is needed for the first dependency installation and background map tiles. Press **Ctrl+C** in the terminal to stop the app.
+
+**Live-Feed** additionally requires the local configuration described in [collector setup](pythontest/README.md) and [database setup](supabase/README.md). For Demo mode without starting the collector, run `python3 scripts/start-presentation.py --no-collector`. If port 8000 is occupied, add `--port 8001`.
+
+The sections below cover optional command-line assessment and manual development setup.
+
+## Command-line assessment
+
 From the repository root, run the latest saved open-data observations only. The CLI reads weather, traffic, Rhine, Port and road evidence from Supabase. Credentials are read server-side from the local .env; failed database reads do not fall back to local archives. This does not simulate package temperature, traffic, or ETA:
 
 ```sh
@@ -74,15 +90,7 @@ The terminal now reports the known score contribution and a range for missing ev
 
 ## Logistics dashboard
 
-For the presentation, start everything from the repository root with one command:
-
-```sh
-python3 scripts/start-presentation.py
-```
-
-This builds the website, starts the local server and API requester, and opens the dashboard in your browser. Press Ctrl+C to stop both processes. It installs the declared frontend dependencies with `npm ci` only when `frontend/node_modules` is absent. Python 3.10+ and Node.js/npm must already be installed. On Windows use `python` instead of `python3` with a native Windows Python installation.
-
-Use `--no-browser` to open the URL yourself, `--port 8001` if port 8000 is occupied, or `--no-collector` when the API requester is already running. Demo playback does not wait for live data collection; Live data needs the local Supabase configuration and a network connection. OpenStreetMap background tiles also need internet.
+For the one-command presentation launcher, see [How to run it](#how-to-run-it). Add `--no-browser` if you prefer to open the URL yourself. The manual setup below is useful for development.
 
 The frontend now shows environmental measurement cards, traffic messages, a selectable truck fleet, shipment details, temperature history, priority-score components and MapLibre routes. A visible switch selects Demo or Live evidence.
 
