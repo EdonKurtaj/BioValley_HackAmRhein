@@ -25,7 +25,7 @@ export interface MapDataSource {
 
 export type FeedMode = "demo" | "live";
 export type DemoScenario =
-  "fleet" | "normal" | "traffic" | "urgent" | "heat" | "reroute";
+  "fleet" | "normal" | "traffic" | "urgent" | "heat" | "reroute" | "harsh";
 export type ShipmentAction =
   "normal" | "buffer" | "expedite" | "reroute" | "quality_review" | "monitor";
 export type Coordinates = [number, number];

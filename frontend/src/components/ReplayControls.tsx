@@ -1,5 +1,5 @@
 import type { FeedMode, DemoScenario } from "../interfaces";
-import { scenarioLabels } from "../config/dashboard";
+import { scenarioDescriptions, scenarioLabels } from "../config/dashboard";
 
 export function ReplayControls({
   mode,
@@ -36,21 +36,28 @@ export function ReplayControls({
       </div>
       {mode === "demo" && (
         <div className="replay-controls">
-          <label>
-            Szenario
-            <select
-              value={scenario}
-              onChange={(event) =>
-                onScenario(event.target.value as DemoScenario)
-              }
-            >
-              {Object.entries(scenarioLabels).map(([key, label]) => (
-                <option key={key} value={key}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="scenario-picker">
+            <label>
+              Szenario
+              <select
+                value={scenario}
+                onChange={(event) =>
+                  onScenario(event.target.value as DemoScenario)
+                }
+              >
+                {Object.entries(scenarioLabels).map(([key, label]) => (
+                  <option key={key} value={key}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {scenarioDescriptions[scenario] && (
+              <small className="scenario-explanation">
+                {scenarioDescriptions[scenario]}
+              </small>
+            )}
+          </div>
           <button
             className="replay-button"
             disabled={!canPlay}

@@ -14,7 +14,7 @@ import type { DashboardSnapshot, DemoScenario, FeedMode } from "./interfaces";
 
 export default function App() {
   const [mode, setMode] = useState<FeedMode>("demo");
-  const [scenario, setScenario] = useState<DemoScenario>("fleet");
+  const [scenario, setScenario] = useState<DemoScenario>("reroute");
   const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -34,7 +34,6 @@ export default function App() {
     let timer: number;
     let controller: AbortController;
     setLoading(true);
-    setSnapshot(null);
     setError("");
     async function refresh() {
       controller = new AbortController();
@@ -107,6 +106,7 @@ export default function App() {
   ]);
 
   function restart(nextScenario = scenario) {
+    setSnapshot(null);
     setPlaying(true);
     elapsed.current = 0;
     setAnchor(new Date().toISOString());
@@ -121,6 +121,7 @@ export default function App() {
     setPlaying(next === "demo");
     setSnapshot(null);
     setSelectedLocationId(null);
+    if (next === "demo") restart();
     setMode(next);
   }
 
