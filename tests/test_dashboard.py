@@ -79,6 +79,19 @@ class DemoFleetTests(unittest.TestCase):
         self.assertEqual(delivered["status"], "delivered")
         self.assertIsNone(delivered["alternateEtaAt"])
 
+    def test_reroute_resolves_disruption_and_updates_arrival_and_priority(self):
+        before = demo_fleet(self.anchor, 4, "reroute")["shipments"][0]
+        after = demo_fleet(self.anchor, 5, "reroute")["shipments"][0]
+        self.assertEqual(before["action"], "reroute")
+        self.assertFalse(before["routing"]["rerouted"])
+        self.assertTrue(after["routing"]["rerouted"])
+        self.assertEqual(after["action"], "normal")
+        self.assertEqual(after["status"], "moving")
+        self.assertLess(after["etaAt"], before["etaAt"])
+        self.assertGreater(after["slackMinutes"], before["slackMinutes"])
+        self.assertLess(after["score"]["minimum"], before["score"]["minimum"])
+        self.assertFalse(after["thermal"]["quality_review_required"])
+
     def test_bad_replay_inputs_are_rejected(self):
         for value in (-1, 181, float("nan"), float("inf")):
             with self.subTest(value=value), self.assertRaises(ValueError):

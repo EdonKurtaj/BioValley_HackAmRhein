@@ -131,14 +131,20 @@ export function ShipmentDetails({
         <span className="eyebrow">EMPFEHLUNG</span>
         <strong>{actionLabels[shipment.action]}</strong>
         <p>{actionDescriptions[shipment.action]}</p>
-        <details>
-          <summary>Backend-Begründung</summary>
-          <p lang="en">{shipment.reason}</p>
-        </details>
+        <p className="decision-evidence" lang="en">
+          {shipment.reason}
+        </p>
+        {shipment.routing?.rerouted && shipment.action === "normal" && (
+          <p>
+            Die Umleitung ist aktiv. Der neue Ankunftsplan hält den
+            Produktionspuffer ein; deshalb ist aktuell keine weitere Maßnahme
+            nötig.
+          </p>
+        )}
       </div>
       <div className="shipment-metrics">
         <div>
-          <small>Pakettemperatur</small>
+          <small>Pakettemperatur · simuliert</small>
           <strong>
             {shipment.temperatureC.toFixed(1)} <span>°C</span>
           </strong>
@@ -148,7 +154,7 @@ export function ShipmentDetails({
           </small>
         </div>
         <div>
-          <small>Prioritätsindex</small>
+          <small>Prioritätsindex · Demo</small>
           <strong>
             {riskLabel}
             <span> / 100</span>
@@ -243,8 +249,8 @@ export function ShipmentDetails({
       </div>
       <p className="detail-limit">
         *Straßengeometrie aus OSRM / OpenStreetMap. GPS, Temperaturen und Zeiten
-        sind simuliert. Der Index erklärt Priorität; er gibt Material nicht
-        frei.
+        sind simuliert. Der Index erklärt Priorität; er ist keine kalibrierte
+        Wahrscheinlichkeit und gibt Material nicht frei.
       </p>
     </aside>
   );

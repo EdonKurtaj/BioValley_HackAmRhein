@@ -7,6 +7,14 @@ export const scenarioLabels: Record<DemoScenario, string> = {
   urgent: "Stau + dringende Lieferung",
   heat: "Temperaturabweichung",
   reroute: "BV-104 · Stau und Umleitung",
+  harsh: "Einzeltransport · Extrembedingungen",
+};
+
+export const scenarioDescriptions: Partial<Record<DemoScenario, string>> = {
+  reroute:
+    "BV-104: simulierte Sperrung mit 45 min Verzögerung. Nach 5 Demo-Minuten wird eine frühere Alternative aktiviert. ETA, Zeitpuffer und Index werden neu berechnet; Normal bedeutet, dass die Umleitung den Engpass gelöst hat.",
+  harsh:
+    "Ein kritischer Transport: simulierte Pakettemperatur über 8 °C, 45 min Routenstörung und nur 20 min bis zum Bedarf. Qualitätsprüfung hat Vorrang; alle drei Signale treiben den Demo-Index.",
 };
 
 export const actionLabels: Record<ShipmentAction, string> = {

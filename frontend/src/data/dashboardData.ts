@@ -191,9 +191,15 @@ export function parseDashboard(
     value.mode === "live"
       ? value.simulation !== null || value.shipments.length > 0
       : !record(value.simulation) ||
-        !["fleet", "normal", "traffic", "urgent", "heat", "reroute"].includes(
-          String(value.simulation.scenario),
-        ) ||
+        ![
+          "fleet",
+          "normal",
+          "traffic",
+          "urgent",
+          "heat",
+          "reroute",
+          "harsh",
+        ].includes(String(value.simulation.scenario)) ||
         !between(value.simulation.elapsedMinutes, 0, 180) ||
         !between(value.simulation.maximumMinutes, 0, 180) ||
         !between(value.simulation.minutesPerSecond, 0, 60)

@@ -15,7 +15,7 @@ from .thermal import analyze_temperature_series, time_to_temperature_limit
 
 CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "demo-transports.json"
 DEMO_CONFIG = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-SCENARIOS = ("fleet", "normal", "traffic", "urgent", "heat", "reroute")
+SCENARIOS = ("fleet", "normal", "traffic", "urgent", "heat", "reroute", "harsh")
 
 
 def _plans(scenario: str) -> list[ShipmentPlan]:
@@ -24,6 +24,19 @@ def _plans(scenario: str) -> list[ShipmentPlan]:
         fields = {**record, "coordinates": tuple(tuple(point) for point in road_candidates(record["id"])[0]["coordinates"])}
         fields["alternate_coordinates"] = ()
         plans.append(ShipmentPlan(**fields))
+    if scenario == "harsh":
+        # A single compound case makes quality-hold precedence visible in a short demo.
+        first = plans[0]
+        return [replace(
+            first,
+            priority="critical",
+            delay_minutes=45,
+            start_c=7,
+            ambient_c=40,
+            tau_minutes=90,
+            need_after_departure_minutes=first.travel_minutes + 65,
+            alternate_coordinates=(),
+        )]
     if scenario != "fleet":
         plans = [replace(plan, delay_minutes=0, start_c=5, ambient_c=5,
                          need_after_departure_minutes=plan.travel_minutes + 360,
