@@ -52,11 +52,6 @@ export function ReplayControls({
                 ))}
               </select>
             </label>
-            {scenarioDescriptions[scenario] && (
-              <small className="scenario-explanation">
-                {scenarioDescriptions[scenario]}
-              </small>
-            )}
           </div>
           <button
             className="replay-button"
@@ -72,6 +67,11 @@ export function ReplayControls({
           >
             ↺ Neustart
           </button>
+          {scenarioDescriptions[scenario] && (
+            <small className="scenario-explanation">
+              {scenarioDescriptions[scenario]}
+            </small>
+          )}
           <small>1 Sekunde = 1 Demo-Minute</small>
         </div>
       )}
