@@ -74,6 +74,16 @@ The terminal now reports the known score contribution and a range for missing ev
 
 ## Logistics dashboard
 
+For the presentation, start everything from the repository root with one command:
+
+```sh
+python3 scripts/start-presentation.py
+```
+
+This builds the website, starts the local server and API requester, and opens the dashboard in your browser. Press Ctrl+C to stop both processes. It installs the declared frontend dependencies with `npm ci` only when `frontend/node_modules` is absent. Python 3.10+ and Node.js/npm must already be installed. On Windows use `python` instead of `python3` with a native Windows Python installation.
+
+Use `--no-browser` to open the URL yourself, `--port 8001` if port 8000 is occupied, or `--no-collector` when the API requester is already running. Demo playback does not wait for live data collection; Live data needs the local Supabase configuration and a network connection. OpenStreetMap background tiles also need internet.
+
 The frontend now shows environmental measurement cards, traffic messages, a selectable truck fleet, shipment details, temperature history, priority-score components and MapLibre routes. A visible switch selects Demo or Live evidence.
 
 Use Python 3.10+ and the existing Node.js/npm setup. Build the frontend once:
