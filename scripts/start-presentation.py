@@ -51,7 +51,14 @@ def main():
         parser.error(f"Port {args.port} is already in use. Stop the existing server or use --port 8001.")
     os.chdir(PROJECT_ROOT)
     frontend = PROJECT_ROOT / "frontend"
-    if not (frontend / "node_modules").is_dir():
+    dependencies_installed = (frontend / "node_modules").is_dir() and subprocess.run(
+        [npm, "ls", "--all", "--silent"],
+        cwd=frontend,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    ).returncode == 0
+    if not dependencies_installed:
         print("Installing the declared frontend dependencies…", flush=True)
         subprocess.run([npm, "ci"], cwd=frontend, check=True)
     print("Building the presentation website…", flush=True)
